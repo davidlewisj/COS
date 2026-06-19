@@ -3,7 +3,7 @@ import { STORAGE_KEYS, PROFILE_DEFAULT, TEAM_DEFAULT, TEAMS_DEFAULT, SC_DEFAULT,
 import { uid, getWeekRange, getPeriods, getRollupVal, scaleGoal, load, save, fmtDate, isOverdue } from "./utils/helpers";
 import { useIsMobile } from "./hooks/useIsMobile";
 import { Ic } from "./components/Icons";
-import { Av, CircleCk, Modal, EmptySVG, GaugeChart, DonutChart, MiniBarChart } from "./components/Shared";
+import { Av, CircleCk, Modal, EmptySVG, DonutChart, MiniBarChart } from "./components/Shared";
 import { NotificationsPanel } from "./components/NotificationsPanel";
 
 // DASHBOARD PAGE
@@ -16,7 +16,6 @@ function DashboardPage({ todos, setTodos, rocks, issues, scorecard, scData, team
 
   const teamTodos = todos.filter(t => !t.done && activeMemberIds.includes(t.owner));
   const activeRocks = rocks.filter(r => activeMemberIds.includes(r.owner) && r.status !== "completed");
-  const onTrack = activeRocks.filter(r => r.status === "on-track").length;
   const activeScorecard = scorecard.filter(m => activeMemberIds.includes(m.owner));
   const hits = activeScorecard.filter(m => { const v = parseFloat(scData[week.key]?.[m.id]); return !isNaN(v) && v >= m.goal; }).length;
 
@@ -55,7 +54,7 @@ function DashboardPage({ todos, setTodos, rocks, issues, scorecard, scData, team
         <W title="Scorecard" action={() => setPage("scorecard")} minH={120}>
           <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 0 12px" }}>
             <DonutChart hits={hits} total={activeScorecard.length} />
-            <div><div style={{ fontSize: 12, color: "var(--t2)" }}>This week's hits</div><div style={{ fontSize: 11, color: "var(--t3)", marginTop: 2 }}>{week.label}</div></div>
+            <div><div style={{ fontSize: 12, color: "var(--t2)" }}>This week&apos;s hits</div><div style={{ fontSize: 11, color: "var(--t3)", marginTop: 2 }}>{week.label}</div></div>
           </div>
         </W>
         <W title="Rocks" count={activeRocks.length} action={() => setPage("rocks")} minH={120}>
@@ -819,7 +818,7 @@ function IssuesPage({ issues, setIssues, team, activeMemberIds }) {
 
 function MeetingsPage({ meetings, setMeetings, issues, todos, team, activeMemberIds }) {
   const store = meetings && typeof meetings === "object" ? meetings : {};
-  const mState = store.current || {
+  const defaultMeetingRef = useRef({
     title: "Weekly Level 10",
     date: new Date().toISOString().slice(0, 10),
     sections: {
@@ -832,7 +831,8 @@ function MeetingsPage({ meetings, setMeetings, issues, todos, team, activeMember
     },
     tangents: [],
     timerSeconds: 0
-  };
+  });
+  const mState = store.current || defaultMeetingRef.current;
 
   const [running, setRunning] = useState(false);
   const [tangentText, setTangentText] = useState("");
@@ -847,7 +847,7 @@ function MeetingsPage({ meetings, setMeetings, issues, todos, team, activeMember
       });
     }, 1000);
     return () => clearInterval(id);
-  }, [running, setMeetings]);
+  }, [running, setMeetings, mState]);
 
   const updateMeeting = updater => {
     setMeetings(prev => {
@@ -1413,7 +1413,7 @@ export default function App() {
           <Ic.Bell />{activeTodos + openIssues > 0 && <span style={{ position: "absolute", top: 1, right: 1, background: "var(--red)", color: "#fff", borderRadius: 10, fontSize: 9, fontWeight: 700, padding: "1px 4px", minWidth: 14, textAlign: "center", lineHeight: "14px" }}>{activeTodos + openIssues}</span>}
         </button>
         <button onClick={() => setPage("profile")} style={{ display: "flex", alignItems: "center", gap: 7, padding: "4px 10px 4px 6px", border: "1px solid var(--brd)", borderRadius: 20, background: page === "profile" ? "var(--blue-l)" : "var(--white)", cursor: "pointer", transition: "all .12s", color: page === "profile" ? "var(--blue)" : "var(--t2)" }}>
-          <div style={{ width: 24, height: 24, borderRadius: "50%", background: "#4A90D9", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700, color: "#fff" }}>DL</div>
+          <div style={{ width: 24, height: 24, borderRadius: "50%", background: "#4A90D9", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700, color: "#fff" }}>{`${profile.firstName?.[0] || ""}${profile.lastName?.[0] || ""}`.toUpperCase()}</div>
           <span style={{ fontSize: 12, fontWeight: 600 }}>{profile.firstName}</span>
         </button>
       </div>
