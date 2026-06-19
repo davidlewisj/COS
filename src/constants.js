@@ -329,6 +329,19 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg)
 @keyframes modalIn{from{transform:translateY(10px);opacity:0}}
 @keyframes slideInRight{from{transform:translateX(100%);opacity:.5}}
 
+/* ── Auth ── */
+.auth-shell{min-height:100vh;min-height:100dvh;display:flex;align-items:center;justify-content:center;background:var(--bg);padding:24px}
+.auth-card{width:380px;max-width:100%;background:var(--white);border:1px solid var(--brd);border-radius:12px;padding:32px;box-shadow:0 4px 24px rgba(0,0,0,.04)}
+.auth-logo{width:36px;height:36px;background:linear-gradient(135deg,#2563EB,#60A5FA);border-radius:9px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:15px;margin-bottom:16px}
+.auth-card h2{font-size:19px;font-weight:700;margin-bottom:4px}
+.auth-card .sub{font-size:13px;color:var(--t2);margin-bottom:22px}
+.auth-err{background:var(--red-l);color:var(--red-t);font-size:12.5px;padding:9px 12px;border-radius:8px;margin-bottom:16px;line-height:1.4}
+.auth-foot{margin-top:18px;font-size:13px;color:var(--t2);text-align:center}
+.auth-invite{border:1px solid var(--brd);border-radius:8px;padding:12px 14px;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;gap:10px}
+.auth-invite strong{font-size:13.5px}
+.auth-or{display:flex;align-items:center;gap:10px;margin:18px 0;color:var(--t3);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.auth-or::before,.auth-or::after{content:"";flex:1;height:1px;background:var(--brd)}
+
 @media(max-width:767px){
   .sb{display:none!important}
   .main{width:100%}
