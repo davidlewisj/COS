@@ -914,6 +914,234 @@ function IssuesPage({ issues, setIssues, team, activeMemberIds, rocks, todos, se
   </>;
 }
 
+const PROCESS_STATUS = {
+  "not-started": { label: "Not Started", cls: "status-muted" },
+  "draft": { label: "Draft", cls: "status-warn" },
+  "documented": { label: "Documented", cls: "status-on" },
+  "fba": { label: "FBA", cls: "status-fba" }
+};
+
+function ProcessesPage({ processes, setProcesses, team, activeMemberIds }) {
+  const [search, setSearch] = useState("");
+  const [ownerFilter, setOwnerFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [modal, setModal] = useState(null);
+  const [editId, setEditId] = useState(null);
+  const [selectedId, setSelectedId] = useState(null);
+  const [form, setForm] = useState({ title: "", owner: "1", status: "not-started", steps: "", notes: "" });
+
+  const openAdd = () => {
+    setEditId(null);
+    setForm({ title: "", owner: "1", status: "not-started", steps: "", notes: "" });
+    setModal("process");
+  };
+
+  const openEdit = proc => {
+    setEditId(proc.id);
+    setForm({
+      title: proc.title || "",
+      owner: proc.owner || "1",
+      status: proc.status || "not-started",
+      steps: (proc.steps || []).join("\n"),
+      notes: proc.notes || ""
+    });
+    setModal("process");
+  };
+
+  const saveProcess = () => {
+    const title = form.title.trim();
+    if (!title) return;
+    const payload = {
+      title,
+      owner: form.owner,
+      status: form.status,
+      steps: parseLines(form.steps),
+      notes: form.notes
+    };
+    if (editId) {
+      setProcesses(prev => prev.map(p => (p.id === editId ? { ...p, ...payload } : p)));
+    } else {
+      setProcesses(prev => [...prev, { id: uid(), ...payload, lastReviewed: null, createdAt: new Date().toISOString() }]);
+    }
+    setModal(null);
+  };
+
+  const removeProcess = id => {
+    setProcesses(prev => prev.filter(p => p.id !== id));
+    if (selectedId === id) setSelectedId(null);
+    setModal(null);
+  };
+
+  const markReviewed = id => {
+    setProcesses(prev => prev.map(p => (p.id === id ? { ...p, lastReviewed: new Date().toISOString().split("T")[0] } : p)));
+  };
+
+  const filtered = processes
+    .filter(p => {
+      if (!activeMemberIds.includes(p.owner)) return false;
+      if (ownerFilter !== "all" && p.owner !== ownerFilter) return false;
+      if (statusFilter !== "all" && (p.status || "not-started") !== statusFilter) return false;
+      if (search && !p.title.toLowerCase().includes(search.toLowerCase())) return false;
+      return true;
+    })
+    .sort((a, b) => (a.title || "").localeCompare(b.title || ""));
+
+  const selected = processes.find(p => p.id === selectedId) || null;
+
+  return <>
+    <div className="phdr">
+      <div className="phdr-top">
+        <div>
+          <h1>Processes</h1>
+          <div className="phdr-desc">Document, standardize, and keep your core processes followed by all.</div>
+        </div>
+        <div className="phdr-actions">
+          <button className="btn btn-p" onClick={openAdd}><Ic.Plus /> Add process</button>
+        </div>
+      </div>
+    </div>
+
+    <div className="toolbar">
+      <select className="tb-filter" value={ownerFilter} onChange={e => setOwnerFilter(e.target.value)}>
+        <option value="all">Owner: All</option>
+        {team.filter(m => m.id !== "2").map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+      </select>
+      <select className="tb-filter" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+        <option value="all">Status: All</option>
+        <option value="not-started">Not Started</option>
+        <option value="draft">Draft</option>
+        <option value="documented">Documented</option>
+        <option value="fba">FBA</option>
+      </select>
+      <div className="tb-search">
+        <Ic.Search />
+        <input placeholder="Search processes..." value={search} onChange={e => setSearch(e.target.value)} />
+      </div>
+    </div>
+
+    <div className="content"><div className="content-inner" style={{ display: "grid", gridTemplateColumns: "1fr minmax(280px, 380px)", gap: 16 }}>
+      <div className="sec" style={{ marginBottom: 0 }}>
+        <div className="sec-hdr">
+          <h2>Process List<span className="count">{filtered.length}</span></h2>
+        </div>
+
+        {filtered.length === 0 ? <div className="empty"><h3>No processes documented</h3><p>Add your first core process to start building your playbook.</p></div> : (
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>Title</th>
+                <th style={{ width: 120 }}>Status</th>
+                <th style={{ width: 100 }}>Reviewed</th>
+                <th style={{ width: 85 }}>Owner</th>
+                <th style={{ width: 70 }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(proc => {
+                const m = team.find(x => x.id === proc.owner) || team[1];
+                const active = selectedId === proc.id;
+                const st = PROCESS_STATUS[proc.status || "not-started"];
+                return <tr key={proc.id} style={active ? { background: "var(--blue-l)" } : {}}>
+                  <td onClick={() => setSelectedId(proc.id)} style={{ cursor: "pointer", fontWeight: 600 }}>{proc.title}</td>
+                  <td><span className={`status ${st.cls}`}>{st.label}</span></td>
+                  <td style={{ color: "var(--t2)" }}>{proc.lastReviewed ? fmtDate(proc.lastReviewed) : "-"}</td>
+                  <td><Av m={m} /></td>
+                  <td><button className="btn-ghost" onClick={() => openEdit(proc)}>Edit</button></td>
+                </tr>;
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="sec" style={{ marginBottom: 0 }}>
+        <div className="sec-hdr"><h2>Details</h2></div>
+        {!selected ? <div className="empty" style={{ padding: "30px 16px" }}><p>Select a process to view its steps.</p></div> : <div style={{ padding: "16px 20px" }}>
+          <div style={{ fontSize: 11, color: "var(--t3)", textTransform: "uppercase", fontWeight: 700, letterSpacing: ".05em" }}>Title</div>
+          <div style={{ marginTop: 6, fontSize: 15, fontWeight: 600 }}>{selected.title}</div>
+
+          <div style={{ display: "flex", gap: 10, marginTop: 14, alignItems: "center", flexWrap: "wrap" }}>
+            <span className={`status ${PROCESS_STATUS[selected.status || "not-started"].cls}`}>{PROCESS_STATUS[selected.status || "not-started"].label}</span>
+            <span style={{ fontSize: 12, color: "var(--t2)" }}>Last reviewed: {selected.lastReviewed ? fmtDate(selected.lastReviewed) : "Never"}</span>
+          </div>
+
+          <div style={{ marginTop: 16 }}>
+            <div style={{ fontSize: 11, color: "var(--t3)", textTransform: "uppercase", fontWeight: 700, letterSpacing: ".05em" }}>Steps (one per line)</div>
+            <textarea
+              value={(selected.steps || []).join("\n")}
+              onChange={e => setProcesses(prev => prev.map(p => (p.id === selected.id ? { ...p, steps: parseLines(e.target.value) } : p)))}
+              placeholder={"1. First step\n2. Second step..."}
+              style={{ marginTop: 8, width: "100%", minHeight: 140, border: "1px solid var(--brd)", borderRadius: 8, padding: 10, fontFamily: "inherit", fontSize: 13, resize: "vertical" }}
+            />
+          </div>
+
+          <div style={{ marginTop: 16 }}>
+            <div style={{ fontSize: 11, color: "var(--t3)", textTransform: "uppercase", fontWeight: 700, letterSpacing: ".05em" }}>Notes</div>
+            <textarea
+              value={selected.notes || ""}
+              onChange={e => setProcesses(prev => prev.map(p => (p.id === selected.id ? { ...p, notes: e.target.value } : p)))}
+              placeholder="Tools, exceptions, links to docs..."
+              style={{ marginTop: 8, width: "100%", minHeight: 90, border: "1px solid var(--brd)", borderRadius: 8, padding: 10, fontFamily: "inherit", fontSize: 13, resize: "vertical" }}
+            />
+          </div>
+
+          <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+            <button className="btn" onClick={() => markReviewed(selected.id)}>Mark reviewed today</button>
+            <button className="btn" onClick={() => openEdit(selected)}>Edit metadata</button>
+          </div>
+        </div>}
+      </div>
+    </div></div>
+
+    {modal === "process" && <Modal title={editId ? "Edit process" : "Create process"} onClose={() => setModal(null)}>
+      <div className="modal-body">
+        <div className="field">
+          <label>Process title</label>
+          <input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="e.g., New patient onboarding" autoFocus />
+        </div>
+
+        <div style={{ display: "flex", gap: 12 }}>
+          <div className="field" style={{ flex: 1 }}>
+            <label>Owner</label>
+            <select value={form.owner} onChange={e => setForm({ ...form, owner: e.target.value })}>
+              {team.filter(m => m.id !== "2").map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select>
+          </div>
+          <div className="field" style={{ flex: 1 }}>
+            <label>Status</label>
+            <select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}>
+              <option value="not-started">Not Started</option>
+              <option value="draft">Draft</option>
+              <option value="documented">Documented</option>
+              <option value="fba">FBA</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="field">
+          <label>Steps (one per line)</label>
+          <textarea value={form.steps} onChange={e => setForm({ ...form, steps: e.target.value })} placeholder={"Step one\nStep two\nStep three"} rows={5} />
+        </div>
+
+        <div className="field" style={{ marginBottom: 0 }}>
+          <label>Notes</label>
+          <textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} placeholder="Tools, exceptions, links to docs..." rows={3} />
+        </div>
+      </div>
+
+      <div className="modal-foot" style={{ justifyContent: "space-between" }}>
+        <div>
+          {editId && <button className="btn" style={{ color: "var(--red-t)", borderColor: "var(--red)" }} onClick={() => removeProcess(editId)}><Ic.Trash /> Delete</button>}
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn" onClick={() => setModal(null)}>Cancel</button>
+          <button className="btn btn-p" onClick={saveProcess}>{editId ? "Save" : "Create"}</button>
+        </div>
+      </div>
+    </Modal>}
+  </>;
+}
+
 function MeetingsPage({ meetings, setMeetings, issues, todos, team, activeMemberIds }) {
   const store = meetings && typeof meetings === "object" ? meetings : {};
   const defaultMeetingRef = useRef({
@@ -1576,6 +1804,7 @@ export default function App() {
   const [vision, setVision] = useState(VISION_DEFAULT);
   const [seats, setSeats] = useState(SEATS_DEFAULT);
   const [peopleAnalyzer, setPeopleAnalyzer] = useState(PEOPLE_ANALYZER_DEFAULT);
+  const [processes, setProcesses] = useState([]);
   const [loaded, setLoaded] = useState(false);
   const [sbCollapsed, setSbCollapsed] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
@@ -1584,7 +1813,7 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
-      const [t, s, sd, m, i, tm, r, h, v, tms, pr, st, pa] = await Promise.all([
+      const [t, s, sd, m, i, tm, r, h, v, tms, pr, st, pa, pc] = await Promise.all([
         load(STORAGE_KEYS.todos, []),
         load(STORAGE_KEYS.scorecard, SC_DEFAULT),
         load(STORAGE_KEYS.scData, {}),
@@ -1598,8 +1827,9 @@ export default function App() {
         load(STORAGE_KEYS.profile, PROFILE_DEFAULT),
         load(STORAGE_KEYS.seats, SEATS_DEFAULT),
         load(STORAGE_KEYS.peopleAnalyzer, PEOPLE_ANALYZER_DEFAULT),
+        load(STORAGE_KEYS.processes, []),
       ]);
-      setTodos(t); setScorecard(s); setScData(sd); setMeetings(m); setIssues(i); setTeam(tm); setRocks(r); setHeadlines(h); setVision(v); setTeams(tms); setProfile(pr); setSeats(st); setPeopleAnalyzer(pa);
+      setTodos(t); setScorecard(s); setScData(sd); setMeetings(m); setIssues(i); setTeam(tm); setRocks(r); setHeadlines(h); setVision(v); setTeams(tms); setProfile(pr); setSeats(st); setPeopleAnalyzer(pa); setProcesses(pc);
       setLoaded(true);
     })();
   }, []);
@@ -1617,6 +1847,7 @@ export default function App() {
   useEffect(() => { if (loaded) save(STORAGE_KEYS.profile, profile); }, [profile, loaded]);
   useEffect(() => { if (loaded) save(STORAGE_KEYS.seats, seats); }, [seats, loaded]);
   useEffect(() => { if (loaded) save(STORAGE_KEYS.peopleAnalyzer, peopleAnalyzer); }, [peopleAnalyzer, loaded]);
+  useEffect(() => { if (loaded) save(STORAGE_KEYS.processes, processes); }, [processes, loaded]);
 
   if (!loaded) return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: "#F8F9FA", color: "#9CA3AF" }}><style>{CSS}</style>Loading...</div>;
 
@@ -1630,6 +1861,7 @@ export default function App() {
     { id: "rocks", label: "Rocks", icon: <Ic.Rocks /> },
     { id: "todos", label: "To-Dos", icon: <Ic.Todos /> },
     { id: "issues", label: "Issues", icon: <Ic.Issues /> },
+    { id: "processes", label: "Processes", icon: <Ic.Process /> },
     { id: "meetings", label: "Meetings", icon: <Ic.Meetings /> },
     { id: "headlines", label: "Headlines", icon: <Ic.Headlines /> },
   ];
@@ -1667,6 +1899,7 @@ export default function App() {
       {page === "scorecard" && <ScorecardPage {...{ scorecard, setScorecard, scData, setScData, team, activeMemberIds, mob }} />}
       {page === "rocks" && <RocksPage {...{ rocks, setRocks, team, activeMemberIds, issues, todos }} />}
       {page === "issues" && <IssuesPage {...{ issues, setIssues, team, activeMemberIds, rocks, todos, setTodos }} />}
+      {page === "processes" && <ProcessesPage {...{ processes, setProcesses, team, activeMemberIds }} />}
       {page === "meetings" && <MeetingsPage {...{ meetings, setMeetings, issues, todos, team, activeMemberIds }} />}
       {page === "headlines" && <HeadlinesPage {...{ headlines, setHeadlines, team, activeMemberIds }} />}
       {page === "vision" && <VisionPage {...{ vision, setVision }} />}

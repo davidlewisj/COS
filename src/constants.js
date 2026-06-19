@@ -13,7 +13,8 @@ export const STORAGE_KEYS = {
   teams: "eos-teams",
   profile: "eos-profile",
   seats: "eos-seats",
-  peopleAnalyzer: "eos-people-analyzer"
+  peopleAnalyzer: "eos-people-analyzer",
+  processes: "eos-processes"
 };
 
 export const PROFILE_DEFAULT = {
@@ -306,6 +307,9 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg)
 .status{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:4px;font-size:12px;font-weight:600}
 .status-on{background:var(--green-l);color:var(--green-t)}
 .status-off{background:var(--red-l);color:var(--red-t)}
+.status-muted{background:var(--bg2);color:var(--t2)}
+.status-warn{background:var(--yellow-l);color:var(--yellow-t)}
+.status-fba{background:var(--purple-l);color:var(--purple-t)}
 
 /* ── Tags / links ── */
 .tag{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:5px;font-size:11px;font-weight:600;background:var(--blue-l);color:var(--blue-t);white-space:nowrap}
