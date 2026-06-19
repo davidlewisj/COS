@@ -62,7 +62,7 @@ function OrgSetup({ session, onReady }) {
     setError("");
     setBusy(true);
     try {
-      await acceptInvite(inviteId, session.user.id);
+      await acceptInvite(inviteId);
       onReady();
     } catch (err) {
       setError(err.message || "Could not accept invite.");
@@ -76,7 +76,7 @@ function OrgSetup({ session, onReady }) {
     setError("");
     setBusy(true);
     try {
-      await createOrganization(orgName.trim(), session.user.id);
+      await createOrganization(orgName.trim());
       onReady();
     } catch (err) {
       setError(err.message || "Could not create organization.");

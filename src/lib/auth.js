@@ -50,26 +50,22 @@ export async function getPendingInvites(email) {
   return data || [];
 }
 
-export async function createOrganization(name, userId) {
-  const { data: org, error: orgErr } = await supabase
-    .from("organizations")
-    .insert({ name })
-    .select()
-    .single();
-  if (orgErr) throw orgErr;
-
-  const { error: memberErr } = await supabase
-    .from("org_members")
-    .insert({ org_id: org.id, user_id: userId, role: "owner", status: "active" });
-  if (memberErr) throw memberErr;
-
+// Creates the org and inserts the caller as its owner atomically (see
+// migration 0010) -- a plain client-side insert can't do this in two steps
+// because the org isn't visible under organizations_select until the
+// org_members row exists, and INSERT ... RETURNING enforces the SELECT
+// policy on the row it hands back.
+export async function createOrganization(name) {
+  const { data: org, error } = await supabase.rpc("create_organization", { org_name: name });
+  if (error) throw error;
   return org;
 }
 
-export async function acceptInvite(inviteId, userId) {
-  const { error } = await supabase
-    .from("org_members")
-    .update({ user_id: userId, status: "active" })
-    .eq("id", inviteId);
+// Accepts via the accept_invite RPC (migration 0012) -- same RETURNING/
+// self-referential-SELECT-policy problem as createOrganization, fixed the
+// same way.
+export async function acceptInvite(inviteId) {
+  const { data, error } = await supabase.rpc("accept_invite", { invite_id: inviteId });
   if (error) throw error;
+  return data;
 }
