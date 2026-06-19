@@ -32,5 +32,11 @@ export default [
       "no-unused-vars": "warn",
       "react-refresh/only-export-components": ["warn", { allowConstantExport: true }]
     }
+  },
+  {
+    files: ["**/*.test.{js,jsx}", "src/test/**"],
+    languageOptions: {
+      globals: globals.vitest
+    }
   }
 ];

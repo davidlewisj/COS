@@ -24,6 +24,8 @@ This starts the Vite dev server (default port 3000, see `vite.config.js`).
 | `npm run build` | Build for production into `dist/` |
 | `npm run preview` | Preview the production build locally |
 | `npm run lint` | Run ESLint over the codebase |
+| `npm test` | Run the test suite once |
+| `npm run test:watch` | Run the test suite in watch mode |
 
 ## Project structure
 
@@ -35,7 +37,12 @@ src/
   components/        # Shared UI pieces (Icons, charts, modal, etc.)
   hooks/             # Custom hooks (e.g. useIsMobile)
   utils/helpers.js   # Date/period math, scorecard rollups, storage helpers
+  test/setup.js      # Vitest/Testing Library setup
 ```
+
+## Testing
+
+Tests use [Vitest](https://vitest.dev) and [React Testing Library](https://testing-library.com/react), and live alongside the code as `*.test.js`/`*.test.jsx` files.
 
 ## Data persistence
 
