@@ -123,11 +123,11 @@ export function isOverdue(s) {
   return new Date(s + "T23:59:59") < new Date();
 }
 
-// Storage operations
+// Storage operations (backed by localStorage)
 export async function load(key, fallback) {
   try {
-    const r = await window.storage.get(key);
-    return r ? JSON.parse(r.value) : fallback;
+    const raw = window.localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
   } catch {
     return fallback;
   }
@@ -135,7 +135,7 @@ export async function load(key, fallback) {
 
 export async function save(key, value) {
   try {
-    await window.storage.set(key, JSON.stringify(value));
+    window.localStorage.setItem(key, JSON.stringify(value));
   } catch (e) {
     console.error(e);
   }
