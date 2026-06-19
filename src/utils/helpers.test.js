@@ -8,6 +8,8 @@ import {
   weekBelongsTo,
   getRollupVal,
   scaleGoal,
+  parseLines,
+  currentQuarterLabel,
   fmtDate,
   isOverdue,
   load,
@@ -112,6 +114,33 @@ describe("scaleGoal", () => {
   it("scales non-percent goals by the period's week count", () => {
     expect(scaleGoal({ unit: "#", goal: 10 }, "monthly")).toBe(40);
     expect(scaleGoal({ unit: "#", goal: 10 }, "quarterly")).toBe(130);
+  });
+});
+
+describe("parseLines", () => {
+  it("splits on newlines and trims whitespace", () => {
+    expect(parseLines("  a \n b\n\nc  ")).toEqual(["a", "b", "c"]);
+  });
+
+  it("returns an empty array for falsy input", () => {
+    expect(parseLines("")).toEqual([]);
+    expect(parseLines(null)).toEqual([]);
+    expect(parseLines(undefined)).toEqual([]);
+  });
+});
+
+describe("currentQuarterLabel", () => {
+  it("matches the current year and quarter with no offset", () => {
+    const now = new Date();
+    const qn = Math.floor(now.getMonth() / 3) + 1;
+    expect(currentQuarterLabel(0)).toBe(`Q${qn} ${now.getFullYear()}`);
+  });
+
+  it("wraps to the previous year when offset crosses a year boundary", () => {
+    const now = new Date();
+    const currentQuarter = Math.floor(now.getMonth() / 3);
+    const label = currentQuarterLabel(-(currentQuarter + 1));
+    expect(label).toBe(`Q4 ${now.getFullYear() - 1}`);
   });
 });
 

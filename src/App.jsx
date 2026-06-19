@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
-import { STORAGE_KEYS, PROFILE_DEFAULT, TEAM_DEFAULT, TEAMS_DEFAULT, SC_DEFAULT, VISION_DEFAULT, CSS } from "./constants";
-import { uid, getWeekRange, getPeriods, getRollupVal, scaleGoal, load, save, fmtDate, isOverdue } from "./utils/helpers";
+import { STORAGE_KEYS, PROFILE_DEFAULT, TEAM_DEFAULT, TEAMS_DEFAULT, SC_DEFAULT, VISION_DEFAULT, SEATS_DEFAULT, PEOPLE_ANALYZER_DEFAULT, CSS } from "./constants";
+import { uid, getWeekRange, getPeriods, getRollupVal, scaleGoal, parseLines, currentQuarterLabel, load, save, fmtDate, isOverdue } from "./utils/helpers";
 import { useIsMobile } from "./hooks/useIsMobile";
 import { Ic } from "./components/Icons";
 import { Av, CircleCk, Modal, EmptySVG, DonutChart, MiniBarChart } from "./components/Shared";
@@ -1143,25 +1143,166 @@ function VisionPage({ vision, setVision }) {
   </>;
 }
 
-function OrgChartPage({ teams, team }) {
-  return <>
-    <div className="phdr"><div className="phdr-top"><div><h1>Org Chart</h1><div className="phdr-desc">Visualize roles and accountability by team.</div></div></div></div>
-    <div className="content"><div className="content-inner">
-      <div className="sec">
-        <div className="sec-hdr"><h2>Reporting Structure</h2></div>
-        <div className="org-wrap">
-          {teams.map(t => {
-            const members = team.filter(m => t.memberIds.includes(m.id));
-            return <div key={t.id} style={{ width: "100%", marginBottom: 26 }}>
-              <div style={{ textAlign: "center", marginBottom: 12, fontSize: 14, fontWeight: 700 }}>{t.name}</div>
-              <div className="org-level">
-                {members.length === 0 ? <div style={{ color: "var(--t3)", fontSize: 13 }}>No team members assigned</div> : members.map(m => <div key={m.id} className="org-card"><div style={{ fontWeight: 700, fontSize: 14 }}>{m.name}</div><div style={{ color: "var(--t2)", marginTop: 4, fontSize: 12 }}>{m.role || "No role"}</div></div>)}
-              </div>
-            </div>;
-          })}
+function AccountabilityChartPage({ seats, setSeats, team, vision, peopleAnalyzer, setPeopleAnalyzer }) {
+  const [tab, setTab] = useState("chart");
+  const [modal, setModal] = useState(null);
+  const [editId, setEditId] = useState(null);
+  const [form, setForm] = useState({ title: "", responsibilities: "", memberId: "", parentId: null });
+  const [quarter, setQuarter] = useState(currentQuarterLabel());
+  const [selectedMemberId, setSelectedMemberId] = useState(null);
+
+  const members = team.filter(m => m.id !== "2");
+
+  const openAddSeat = (parentId = null) => {
+    setEditId(null);
+    setForm({ title: "", responsibilities: "", memberId: "", parentId });
+    setModal("seat");
+  };
+
+  const openEditSeat = seat => {
+    setEditId(seat.id);
+    setForm({
+      title: seat.title || "",
+      responsibilities: (seat.responsibilities || []).join("\n"),
+      memberId: seat.memberId || "",
+      parentId: seat.parentId || null
+    });
+    setModal("seat");
+  };
+
+  const saveSeat = () => {
+    const title = form.title.trim();
+    if (!title) return;
+    const payload = { title, responsibilities: parseLines(form.responsibilities), memberId: form.memberId || null, parentId: form.parentId || null };
+    if (editId) {
+      setSeats(prev => prev.map(s => (s.id === editId ? { ...s, ...payload } : s)));
+    } else {
+      setSeats(prev => [...prev, { id: uid(), ...payload }]);
+    }
+    setModal(null);
+  };
+
+  const removeSeat = id => {
+    setSeats(prev => {
+      const seat = prev.find(s => s.id === id);
+      const reparented = prev.map(s => (s.parentId === id ? { ...s, parentId: seat?.parentId || null } : s));
+      return reparented.filter(s => s.id !== id);
+    });
+    setModal(null);
+  };
+
+  const childrenOf = parentId => seats.filter(s => s.parentId === parentId);
+  const topSeats = childrenOf(null);
+
+  const SeatNode = ({ seat }) => {
+    const m = team.find(x => x.id === seat.memberId);
+    const kids = childrenOf(seat.id);
+    return <div className="acc-branch">
+      <div className="seat-card">
+        <div className="seat-title">{seat.title}</div>
+        <div className="seat-person">{m ? <><Av m={m} size={18} />{m.name}</> : <span style={{ color: "var(--t3)" }}>Unassigned</span>}</div>
+        {!!(seat.responsibilities || []).length && <ul className="seat-resp">{seat.responsibilities.map((r, i) => <li key={i}>{r}</li>)}</ul>}
+        <div className="seat-actions">
+          <button className="btn-ghost" style={{ fontSize: 11 }} onClick={() => openEditSeat(seat)}>Edit</button>
+          <button className="btn-ghost" style={{ fontSize: 11 }} onClick={() => openAddSeat(seat.id)}>+ Report</button>
         </div>
       </div>
-    </div></div>
+      {kids.length > 0 && <div className="acc-children">{kids.map(k => <SeatNode key={k.id} seat={k} />)}</div>}
+    </div>;
+  };
+
+  const coreValues = parseLines(vision.coreValues);
+  const quarterData = peopleAnalyzer[quarter] || {};
+  const getEntry = memberId => quarterData[memberId] || { gwc: {}, values: {}, notes: "" };
+
+  const updateEntry = (memberId, updater) => {
+    setPeopleAnalyzer(prev => {
+      const qData = prev[quarter] || {};
+      const cur = qData[memberId] || { gwc: {}, values: {}, notes: "" };
+      return { ...prev, [quarter]: { ...qData, [memberId]: updater(cur) } };
+    });
+  };
+
+  const toggleGwc = (memberId, key) => updateEntry(memberId, cur => ({ ...cur, gwc: { ...cur.gwc, [key]: !cur.gwc[key] } }));
+
+  const cycleRating = (memberId, value) => updateEntry(memberId, cur => {
+    const order = ["", "+", "+/-", "-"];
+    const idx = order.indexOf(cur.values[value] || "");
+    return { ...cur, values: { ...cur.values, [value]: order[(idx + 1) % order.length] } };
+  });
+
+  const setNotes = (memberId, text) => updateEntry(memberId, cur => ({ ...cur, notes: text }));
+
+  return <>
+    <div className="phdr">
+      <div className="phdr-top">
+        <div>
+          <h1>Accountability Chart</h1>
+          <div className="phdr-desc">Define seats, roles, and reporting lines — and run quarterly People Analyzer conversations.</div>
+        </div>
+        {tab === "chart" && <div className="phdr-actions"><button className="btn btn-p" onClick={() => openAddSeat(null)}><Ic.Plus /> Add seat</button></div>}
+      </div>
+      <div className="tabs">
+        <div className={`tab${tab === "chart" ? " on" : ""}`} onClick={() => setTab("chart")}>Chart</div>
+        <div className={`tab${tab === "analyzer" ? " on" : ""}`} onClick={() => setTab("analyzer")}>People Analyzer</div>
+      </div>
+    </div>
+
+    {tab === "chart" ? <div className="content"><div className="content-inner">
+      <div className="sec" style={{ overflow: "visible" }}>
+        <div className="sec-hdr"><h2>Seats<span className="count">{seats.length}</span></h2></div>
+        {topSeats.length === 0 ? <div className="empty"><h3>No seats defined</h3><p>Add your first seat to start building the chart.</p></div> : <div className="acc-wrap"><div className="acc-row">{topSeats.map(s => <SeatNode key={s.id} seat={s} />)}</div></div>}
+      </div>
+    </div></div> : <div className="content"><div className="content-inner" style={{ display: "grid", gridTemplateColumns: "1fr minmax(260px, 320px)", gap: 16 }}>
+      <div className="sec" style={{ marginBottom: 0 }}>
+        <div className="sec-hdr">
+          <h2>People Analyzer</h2>
+          <input value={quarter} onChange={e => setQuarter(e.target.value)} style={{ width: 110, padding: "5px 10px", border: "1px solid var(--brd)", borderRadius: 8, fontSize: 12, fontFamily: "inherit" }} />
+        </div>
+        {coreValues.length === 0 ? <div className="empty"><p>Add core values on the Vision page (one per line) to enable People Analyzer ratings.</p></div> : <div className="pa-grid">
+          <table className="pa-tbl">
+            <thead><tr><th style={{ textAlign: "left" }}>Name</th><th>GWC</th>{coreValues.map(v => <th key={v}>{v}</th>)}</tr></thead>
+            <tbody>
+              {members.map(m => {
+                const entry = getEntry(m.id);
+                const active = selectedMemberId === m.id;
+                return <tr key={m.id} className={active ? "on" : ""}>
+                  <td className="pa-name" onClick={() => setSelectedMemberId(m.id)}>{m.name}</td>
+                  <td><div className="pa-gwc">
+                    {["get", "want", "capacity"].map(k => <div key={k} className={`pa-gwc-dot${entry.gwc[k] ? " on" : ""}`} title={k} onClick={() => toggleGwc(m.id, k)}>{k[0].toUpperCase()}</div>)}
+                  </div></td>
+                  {coreValues.map(v => <td key={v}><button className="pa-rating" onClick={() => cycleRating(m.id, v)}>{entry.values[v] || "–"}</button></td>)}
+                </tr>;
+              })}
+            </tbody>
+          </table>
+        </div>}
+      </div>
+
+      <div className="sec" style={{ marginBottom: 0 }}>
+        <div className="sec-hdr"><h2>Notes</h2></div>
+        {!selectedMemberId ? <div className="empty" style={{ padding: "30px 16px" }}><p>Select a person to add quarterly conversation notes.</p></div> : <div style={{ padding: 16 }}>
+          <textarea
+            value={getEntry(selectedMemberId).notes || ""}
+            onChange={e => setNotes(selectedMemberId, e.target.value)}
+            placeholder="Document the quarterly conversation..."
+            style={{ width: "100%", minHeight: 220, border: "1px solid var(--brd)", borderRadius: 8, padding: 10, fontFamily: "inherit", fontSize: 13, resize: "vertical" }}
+          />
+        </div>}
+      </div>
+    </div></div>}
+
+    {modal === "seat" && <Modal title={editId ? "Edit seat" : "Add seat"} onClose={() => setModal(null)}>
+      <div className="modal-body">
+        <div className="field"><label>Seat title</label><input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="e.g., Sales Leader" autoFocus /></div>
+        <div className="field"><label>Assigned person</label><select value={form.memberId} onChange={e => setForm({ ...form, memberId: e.target.value })}><option value="">Unassigned</option>{members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select></div>
+        <div className="field" style={{ marginBottom: 0 }}><label>Responsibilities (one per line)</label><textarea rows={5} value={form.responsibilities} onChange={e => setForm({ ...form, responsibilities: e.target.value })} placeholder={"Owns X\nDrives Y\nManages Z"} /></div>
+      </div>
+      <div className="modal-foot" style={{ justifyContent: "space-between" }}>
+        <div>{editId && <button className="btn" style={{ color: "var(--red-t)", borderColor: "var(--red)" }} onClick={() => removeSeat(editId)}><Ic.Trash /> Delete</button>}</div>
+        <div style={{ display: "flex", gap: 8 }}><button className="btn" onClick={() => setModal(null)}>Cancel</button><button className="btn btn-p" onClick={saveSeat}>{editId ? "Save" : "Create"}</button></div>
+      </div>
+    </Modal>}
   </>;
 }
 
@@ -1335,6 +1476,8 @@ export default function App() {
   const [rocks, setRocks] = useState([]);
   const [headlines, setHeadlines] = useState([]);
   const [vision, setVision] = useState(VISION_DEFAULT);
+  const [seats, setSeats] = useState(SEATS_DEFAULT);
+  const [peopleAnalyzer, setPeopleAnalyzer] = useState(PEOPLE_ANALYZER_DEFAULT);
   const [loaded, setLoaded] = useState(false);
   const [sbCollapsed, setSbCollapsed] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
@@ -1343,7 +1486,7 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
-      const [t, s, sd, m, i, tm, r, h, v, tms, pr] = await Promise.all([
+      const [t, s, sd, m, i, tm, r, h, v, tms, pr, st, pa] = await Promise.all([
         load(STORAGE_KEYS.todos, []),
         load(STORAGE_KEYS.scorecard, SC_DEFAULT),
         load(STORAGE_KEYS.scData, {}),
@@ -1355,8 +1498,10 @@ export default function App() {
         load(STORAGE_KEYS.vision, VISION_DEFAULT),
         load(STORAGE_KEYS.teams, TEAMS_DEFAULT),
         load(STORAGE_KEYS.profile, PROFILE_DEFAULT),
+        load(STORAGE_KEYS.seats, SEATS_DEFAULT),
+        load(STORAGE_KEYS.peopleAnalyzer, PEOPLE_ANALYZER_DEFAULT),
       ]);
-      setTodos(t); setScorecard(s); setScData(sd); setMeetings(m); setIssues(i); setTeam(tm); setRocks(r); setHeadlines(h); setVision(v); setTeams(tms); setProfile(pr);
+      setTodos(t); setScorecard(s); setScData(sd); setMeetings(m); setIssues(i); setTeam(tm); setRocks(r); setHeadlines(h); setVision(v); setTeams(tms); setProfile(pr); setSeats(st); setPeopleAnalyzer(pa);
       setLoaded(true);
     })();
   }, []);
@@ -1372,6 +1517,8 @@ export default function App() {
   useEffect(() => { if (loaded) save(STORAGE_KEYS.vision, vision); }, [vision, loaded]);
   useEffect(() => { if (loaded) save(STORAGE_KEYS.teams, teams); }, [teams, loaded]);
   useEffect(() => { if (loaded) save(STORAGE_KEYS.profile, profile); }, [profile, loaded]);
+  useEffect(() => { if (loaded) save(STORAGE_KEYS.seats, seats); }, [seats, loaded]);
+  useEffect(() => { if (loaded) save(STORAGE_KEYS.peopleAnalyzer, peopleAnalyzer); }, [peopleAnalyzer, loaded]);
 
   if (!loaded) return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: "#F8F9FA", color: "#9CA3AF" }}><style>{CSS}</style>Loading...</div>;
 
@@ -1388,7 +1535,7 @@ export default function App() {
     { id: "meetings", label: "Meetings", icon: <Ic.Meetings /> },
     { id: "headlines", label: "Headlines", icon: <Ic.Headlines /> },
   ];
-  const navExtra = [{ id: "vision", label: "Vision / V/TO", icon: <Ic.Vision /> }, { id: "org", label: "Org Chart", icon: <Ic.OrgChart /> }, { id: "team", label: "Team", icon: <Ic.Team /> }];
+  const navExtra = [{ id: "vision", label: "Vision / V/TO", icon: <Ic.Vision /> }, { id: "accountability", label: "Accountability Chart", icon: <Ic.OrgChart /> }, { id: "team", label: "Team", icon: <Ic.Team /> }];
   const sbW = sbCollapsed ? 56 : 228;
 
   return <div className="shell">
@@ -1425,7 +1572,7 @@ export default function App() {
       {page === "meetings" && <MeetingsPage {...{ meetings, setMeetings, issues, todos, team, activeMemberIds }} />}
       {page === "headlines" && <HeadlinesPage {...{ headlines, setHeadlines, team, activeMemberIds }} />}
       {page === "vision" && <VisionPage {...{ vision, setVision }} />}
-      {page === "org" && <OrgChartPage {...{ teams, team }} />}
+      {page === "accountability" && <AccountabilityChartPage {...{ seats, setSeats, team, vision, peopleAnalyzer, setPeopleAnalyzer }} />}
       {page === "team" && <TeamPage {...{ team, setTeam, teams, setTeams }} />}
       {page === "profile" && <ProfilePage {...{ profile, setProfile }} />}
     </div>

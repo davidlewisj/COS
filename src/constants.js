@@ -11,7 +11,9 @@ export const STORAGE_KEYS = {
   headlines: "eos-headlines",
   vision: "eos-vision",
   teams: "eos-teams",
-  profile: "eos-profile"
+  profile: "eos-profile",
+  seats: "eos-seats",
+  peopleAnalyzer: "eos-people-analyzer"
 };
 
 export const PROFILE_DEFAULT = {
@@ -35,6 +37,13 @@ export const TEAM_DEFAULT = [
 export const TEAMS_DEFAULT = [
   { id: "tl1", name: "Leadership Team", memberIds: ["1"] }
 ];
+
+export const SEATS_DEFAULT = [
+  { id: "seat-visionary", title: "Visionary", responsibilities: ["Sets long-term vision and culture", "Owns key relationships"], memberId: "1", parentId: null },
+  { id: "seat-integrator", title: "Integrator", responsibilities: ["Runs day-to-day operations", "Holds the team accountable to the Scorecard and Rocks"], memberId: null, parentId: null }
+];
+
+export const PEOPLE_ANALYZER_DEFAULT = {};
 
 export const SC_DEFAULT = [
   { id: "s1", name: "SMS referrals", owner: "1", goal: 40, unit: "#", op: ">=" },
@@ -240,6 +249,33 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg)
 .org-level{display:flex;justify-content:center;gap:24px;position:relative}
 .org-card{background:var(--white);border:1.5px solid var(--brd);border-radius:12px;padding:16px 20px;text-align:center;cursor:pointer;transition:all .15s;min-width:140px}
 .org-card:hover{border-color:var(--blue);box-shadow:0 4px 16px rgba(37,99,235,.1)}
+
+/* ── Accountability Chart ── */
+.acc-wrap{padding:28px 20px;overflow:auto}
+.acc-row{display:flex;justify-content:center;gap:20px;flex-wrap:wrap}
+.acc-branch{display:flex;flex-direction:column;align-items:center}
+.acc-children{display:flex;gap:20px;margin-top:18px;padding-top:18px;border-top:1.5px solid var(--brd2);flex-wrap:wrap;justify-content:center}
+.seat-card{background:var(--white);border:1.5px solid var(--brd);border-radius:12px;padding:14px 16px;min-width:200px;max-width:240px;transition:all .15s}
+.seat-card:hover{border-color:var(--blue);box-shadow:0 4px 16px rgba(37,99,235,.08)}
+.seat-title{font-weight:700;font-size:14px;color:var(--t1)}
+.seat-person{font-size:12px;color:var(--t2);margin-top:2px;display:flex;align-items:center;gap:6px}
+.seat-resp{list-style:none;margin-top:10px;padding-top:10px;border-top:1px solid var(--brd);text-align:left}
+.seat-resp li{font-size:11.5px;color:var(--t2);padding:2px 0;padding-left:12px;position:relative}
+.seat-resp li::before{content:"";position:absolute;left:0;top:9px;width:5px;height:5px;border-radius:50%;background:var(--t4)}
+.seat-actions{display:flex;gap:6px;margin-top:10px}
+
+/* ── People Analyzer ── */
+.pa-grid{overflow:auto;border:1px solid var(--brd);border-radius:8px;background:var(--white)}
+.pa-tbl{width:100%;border-collapse:collapse;min-width:max-content}
+.pa-tbl th{position:sticky;top:0;background:#EBEEF2;border-bottom:2px solid var(--brd2);border-right:1px solid var(--brd);padding:8px 10px;font-size:10px;font-weight:600;color:var(--t2);text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;text-align:center}
+.pa-tbl td{border-bottom:1px solid var(--brd);border-right:1px solid var(--brd);padding:8px 10px;text-align:center;font-size:13px}
+.pa-tbl td.pa-name{text-align:left;font-weight:600;cursor:pointer;white-space:nowrap}
+.pa-tbl td.pa-name:hover{color:var(--blue)}
+.pa-tbl tr.on td{background:var(--blue-l)}
+.pa-rating{border:1px solid var(--brd);border-radius:6px;font-size:12px;font-family:inherit;padding:4px 6px;background:var(--white);cursor:pointer}
+.pa-gwc{display:flex;gap:4px;justify-content:center}
+.pa-gwc-dot{width:22px;height:22px;border-radius:6px;border:1.5px solid var(--brd2);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:var(--t3);cursor:pointer;transition:all .12s}
+.pa-gwc-dot.on{background:var(--green);border-color:var(--green);color:#fff}
 
 /* ── Modal ── */
 .overlay{position:fixed;inset:0;background:rgba(0,0,0,.3);display:flex;align-items:center;justify-content:center;z-index:200;animation:fadeIn .12s}
