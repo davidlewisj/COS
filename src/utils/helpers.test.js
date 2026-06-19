@@ -13,7 +13,8 @@ import {
   fmtDate,
   isOverdue,
   load,
-  save
+  save,
+  milestoneProgress
 } from "./helpers";
 
 describe("uid", () => {
@@ -166,6 +167,18 @@ describe("isOverdue", () => {
 
   it("returns false for a date far in the future", () => {
     expect(isOverdue("2999-01-01")).toBe(false);
+  });
+});
+
+describe("milestoneProgress", () => {
+  it("counts done vs total milestones", () => {
+    const milestones = [{ done: true }, { done: false }, { done: true }];
+    expect(milestoneProgress(milestones)).toEqual({ done: 2, total: 3 });
+  });
+
+  it("returns zeros for a non-array input", () => {
+    expect(milestoneProgress(undefined)).toEqual({ done: 0, total: 0 });
+    expect(milestoneProgress(null)).toEqual({ done: 0, total: 0 });
   });
 });
 

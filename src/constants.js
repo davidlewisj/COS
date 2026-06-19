@@ -307,6 +307,20 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg)
 .status-on{background:var(--green-l);color:var(--green-t)}
 .status-off{background:var(--red-l);color:var(--red-t)}
 
+/* ── Tags / links ── */
+.tag{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:5px;font-size:11px;font-weight:600;background:var(--blue-l);color:var(--blue-t);white-space:nowrap}
+
+/* ── Milestones ── */
+.progress-bar{flex:1;height:6px;border-radius:3px;background:var(--bg2);overflow:hidden}
+.progress-fill{height:100%;background:var(--green);border-radius:3px;transition:width .2s}
+.ms-row{display:flex;align-items:center;gap:8px;padding:6px 0}
+.ms-row .ms-title{flex:1;font-size:13px}
+.ms-row .ms-title.done{text-decoration:line-through;color:var(--t3)}
+.ms-row .ms-due{font-size:11px;color:var(--t3);white-space:nowrap}
+.ms-add{display:flex;gap:8px;margin-top:8px}
+.ms-add input[type="text"]{flex:1}
+.ms-add input[type="date"]{width:130px}
+
 @keyframes fadeIn{from{opacity:0}}
 @keyframes modalIn{from{transform:translateY(10px);opacity:0}}
 @keyframes slideInRight{from{transform:translateX(100%);opacity:.5}}

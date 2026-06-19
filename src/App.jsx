@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { STORAGE_KEYS, PROFILE_DEFAULT, TEAM_DEFAULT, TEAMS_DEFAULT, SC_DEFAULT, VISION_DEFAULT, SEATS_DEFAULT, PEOPLE_ANALYZER_DEFAULT, CSS } from "./constants";
-import { uid, getWeekRange, getPeriods, getRollupVal, scaleGoal, parseLines, currentQuarterLabel, load, save, fmtDate, isOverdue } from "./utils/helpers";
+import { uid, getWeekRange, getPeriods, getRollupVal, scaleGoal, parseLines, currentQuarterLabel, milestoneProgress, load, save, fmtDate, isOverdue } from "./utils/helpers";
 import { useIsMobile } from "./hooks/useIsMobile";
 import { Ic } from "./components/Icons";
 import { Av, CircleCk, Modal, EmptySVG, DonutChart, MiniBarChart } from "./components/Shared";
@@ -95,18 +95,18 @@ function DashboardPage({ todos, setTodos, rocks, issues, scorecard, scData, team
 }
 
 // TODOS PAGE
-function TodosPage({ todos, setTodos, team, activeMemberIds }) {
+function TodosPage({ todos, setTodos, team, activeMemberIds, rocks }) {
   const [tab, setTab] = useState("team");
   const [search, setSearch] = useState("");
   const [archive, setArchive] = useState(false);
   const [ownerFilter, setOwnerFilter] = useState("all");
   const [modal, setModal] = useState(null);
-  const [form, setForm] = useState({ title: "", owner: "1", dueDate: "" });
+  const [form, setForm] = useState({ title: "", owner: "1", dueDate: "", rockId: "" });
 
   const openAdd = () => {
     const d = new Date();
     d.setDate(d.getDate() + 7);
-    setForm({ title: "", owner: "1", dueDate: d.toISOString().split("T")[0] });
+    setForm({ title: "", owner: "1", dueDate: d.toISOString().split("T")[0], rockId: "" });
     setModal("add");
   };
   const filtered = todos.filter(t => {
@@ -141,9 +141,10 @@ function TodosPage({ todos, setTodos, team, activeMemberIds }) {
           {filtered.map(t => {
             const m = team.find(x => x.id === t.owner) || team[1];
             const od = isOverdue(t.dueDate) && !t.done;
+            const linkedRock = t.rockId && rocks.find(r => r.id === t.rockId);
             return <tr key={t.id}>
               <td><CircleCk on={t.done} toggle={() => setTodos(p => p.map(x => x.id === t.id ? { ...x, done: !x.done } : x))} /></td>
-              <td>{t.title}</td>
+              <td>{t.title}{linkedRock && <span className="tag" style={{ marginLeft: 8 }}>{linkedRock.title}</span>}</td>
               <td style={{ color: od ? "var(--red-t)" : "var(--t2)" }}>{od && <Ic.Warn />}{fmtDate(t.dueDate)}</td>
               <td><Av m={m} /></td>
             </tr>;
@@ -158,10 +159,17 @@ function TodosPage({ todos, setTodos, team, activeMemberIds }) {
           <div className="field" style={{ flex: 1 }}><label>Owner</label><select value={form.owner} onChange={e => setForm({ ...form, owner: e.target.value })}>{team.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select></div>
           <div className="field" style={{ flex: 1 }}><label>Due Date</label><input type="date" value={form.dueDate} onChange={e => setForm({ ...form, dueDate: e.target.value })} /></div>
         </div>
+        <div className="field" style={{ marginBottom: 0 }}>
+          <label>Linked rock (optional)</label>
+          <select value={form.rockId} onChange={e => setForm({ ...form, rockId: e.target.value })}>
+            <option value="">None</option>
+            {rocks.map(r => <option key={r.id} value={r.id}>{r.title}</option>)}
+          </select>
+        </div>
       </div>
       <div className="modal-foot">
         <button className="btn" onClick={() => setModal(null)}>Cancel</button>
-        <button className="btn btn-p" onClick={() => { if (form.title.trim()) { setTodos(p => [...p, { id: uid(), ...form, done: false, createdAt: new Date().toISOString() }]); setModal(null); } }}>Create</button>
+        <button className="btn btn-p" onClick={() => { if (form.title.trim()) { setTodos(p => [...p, { id: uid(), ...form, rockId: form.rockId || null, done: false, createdAt: new Date().toISOString() }]); setModal(null); } }}>Create</button>
       </div>
     </Modal>}
   </>;
@@ -413,14 +421,16 @@ function ScorecardPage({ scorecard, setScorecard, scData, setScData, team, activ
 }
 
 // PLACEHOLDER PAGES
-function RocksPage({ rocks, setRocks, team, activeMemberIds }) {
+function RocksPage({ rocks, setRocks, team, activeMemberIds, issues, todos }) {
   const [tab, setTab] = useState("active");
   const [search, setSearch] = useState("");
   const [ownerFilter, setOwnerFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [modal, setModal] = useState(null);
   const [editId, setEditId] = useState(null);
-  const [form, setForm] = useState({ title: "", owner: "1", dueDate: "", status: "on-track", quarter: "" });
+  const [form, setForm] = useState({ title: "", owner: "1", dueDate: "", status: "on-track", quarter: "", milestones: [] });
+  const [msTitle, setMsTitle] = useState("");
+  const [msDue, setMsDue] = useState("");
 
   const now = new Date();
   const qNum = Math.floor(now.getMonth() / 3) + 1;
@@ -434,7 +444,9 @@ function RocksPage({ rocks, setRocks, team, activeMemberIds }) {
 
   const openAdd = () => {
     setEditId(null);
-    setForm({ title: "", owner: "1", dueDate: defaultDueDate(), status: "on-track", quarter: qLabel });
+    setForm({ title: "", owner: "1", dueDate: defaultDueDate(), status: "on-track", quarter: qLabel, milestones: [] });
+    setMsTitle("");
+    setMsDue("");
     setModal("rock");
   };
 
@@ -445,8 +457,11 @@ function RocksPage({ rocks, setRocks, team, activeMemberIds }) {
       owner: rock.owner || "1",
       dueDate: rock.dueDate || defaultDueDate(),
       status: rock.status || "on-track",
-      quarter: rock.quarter || qLabel
+      quarter: rock.quarter || qLabel,
+      milestones: rock.milestones || []
     });
+    setMsTitle("");
+    setMsDue("");
     setModal("rock");
   };
 
@@ -458,7 +473,8 @@ function RocksPage({ rocks, setRocks, team, activeMemberIds }) {
       owner: form.owner,
       dueDate: form.dueDate,
       status: form.status,
-      quarter: form.quarter || qLabel
+      quarter: form.quarter || qLabel,
+      milestones: form.milestones
     };
     if (editId) {
       setRocks(prev => prev.map(r => (r.id === editId ? { ...r, ...payload } : r)));
@@ -476,6 +492,25 @@ function RocksPage({ rocks, setRocks, team, activeMemberIds }) {
   const setRockStatus = (id, status) => {
     setRocks(prev => prev.map(r => (r.id === id ? { ...r, status } : r)));
   };
+
+  const addMilestone = () => {
+    const title = msTitle.trim();
+    if (!title) return;
+    setForm(prev => ({ ...prev, milestones: [...prev.milestones, { id: uid(), title, done: false, dueDate: msDue }] }));
+    setMsTitle("");
+    setMsDue("");
+  };
+
+  const toggleMilestone = id => {
+    setForm(prev => ({ ...prev, milestones: prev.milestones.map(m => (m.id === id ? { ...m, done: !m.done } : m)) }));
+  };
+
+  const removeMilestone = id => {
+    setForm(prev => ({ ...prev, milestones: prev.milestones.filter(m => m.id !== id) }));
+  };
+
+  const linkedIssues = editId ? issues.filter(i => i.rockId === editId) : [];
+  const linkedTodos = editId ? todos.filter(t => t.rockId === editId) : [];
 
   const filtered = rocks
     .filter(r => {
@@ -534,6 +569,7 @@ function RocksPage({ rocks, setRocks, team, activeMemberIds }) {
             <thead>
               <tr>
                 <th>Title</th>
+                <th style={{ width: 130 }}>Milestones</th>
                 <th style={{ width: 110 }}>Quarter</th>
                 <th style={{ width: 110 }}>Due</th>
                 <th style={{ width: 90 }}>Owner</th>
@@ -545,8 +581,15 @@ function RocksPage({ rocks, setRocks, team, activeMemberIds }) {
               {filtered.map(rock => {
                 const m = team.find(x => x.id === rock.owner) || team[1];
                 const overdue = rock.status !== "completed" && isOverdue(rock.dueDate);
+                const { done: msDone, total: msTotal } = milestoneProgress(rock.milestones);
                 return <tr key={rock.id}>
                   <td>{rock.title}</td>
+                  <td>
+                    {msTotal === 0 ? <span style={{ color: "var(--t3)" }}>-</span> : <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <div className="progress-bar"><div className="progress-fill" style={{ width: `${(msDone / msTotal) * 100}%` }} /></div>
+                      <span style={{ fontSize: 12, color: "var(--t2)", whiteSpace: "nowrap" }}>{msDone}/{msTotal}</span>
+                    </div>}
+                  </td>
                   <td style={{ color: "var(--t2)" }}>{rock.quarter || "-"}</td>
                   <td style={{ color: overdue ? "var(--red-t)" : "var(--t2)" }}>{overdue && <Ic.Warn />}{fmtDate(rock.dueDate)}</td>
                   <td><Av m={m} /></td>
@@ -600,6 +643,31 @@ function RocksPage({ rocks, setRocks, team, activeMemberIds }) {
             </select>
           </div>
         </div>
+
+        <div className="field" style={{ marginBottom: 0 }}>
+          <label>Milestones{form.milestones.length > 0 ? ` (${form.milestones.filter(m => m.done).length}/${form.milestones.length})` : ""}</label>
+          {form.milestones.map(ms => (
+            <div className="ms-row" key={ms.id}>
+              <CircleCk on={ms.done} toggle={() => toggleMilestone(ms.id)} />
+              <span className={`ms-title${ms.done ? " done" : ""}`}>{ms.title}</span>
+              {ms.dueDate && <span className="ms-due">{fmtDate(ms.dueDate)}</span>}
+              <button className="btn-ghost" onClick={() => removeMilestone(ms.id)}><Ic.Trash /></button>
+            </div>
+          ))}
+          <div className="ms-add">
+            <input type="text" value={msTitle} onChange={e => setMsTitle(e.target.value)} placeholder="Add a milestone..." onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addMilestone(); } }} />
+            <input type="date" value={msDue} onChange={e => setMsDue(e.target.value)} />
+            <button className="btn btn-sm" onClick={addMilestone}>Add</button>
+          </div>
+        </div>
+
+        {editId && (linkedIssues.length > 0 || linkedTodos.length > 0) && (
+          <div className="field" style={{ marginBottom: 0, marginTop: 16 }}>
+            <label>Linked Items</label>
+            {linkedIssues.map(i => <div key={i.id} className="ms-row"><span className="tag">Issue</span><span className="ms-title">{i.title}</span></div>)}
+            {linkedTodos.map(t => <div key={t.id} className="ms-row"><span className="tag">To-Do</span><span className="ms-title">{t.title}</span></div>)}
+          </div>
+        )}
       </div>
 
       <div className="modal-foot" style={{ justifyContent: "space-between" }}>
@@ -615,18 +683,18 @@ function RocksPage({ rocks, setRocks, team, activeMemberIds }) {
   </>;
 }
 
-function IssuesPage({ issues, setIssues, team, activeMemberIds }) {
+function IssuesPage({ issues, setIssues, team, activeMemberIds, rocks, todos, setTodos }) {
   const [tab, setTab] = useState("short-term");
   const [search, setSearch] = useState("");
   const [ownerFilter, setOwnerFilter] = useState("all");
   const [modal, setModal] = useState(null);
   const [editId, setEditId] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
-  const [form, setForm] = useState({ title: "", owner: "1", type: "short-term", notes: "" });
+  const [form, setForm] = useState({ title: "", owner: "1", type: "short-term", notes: "", rockId: "" });
 
   const openAdd = () => {
     setEditId(null);
-    setForm({ title: "", owner: "1", type: tab, notes: "" });
+    setForm({ title: "", owner: "1", type: tab, notes: "", rockId: "" });
     setModal("issue");
   };
 
@@ -636,7 +704,8 @@ function IssuesPage({ issues, setIssues, team, activeMemberIds }) {
       title: issue.title || "",
       owner: issue.owner || "1",
       type: issue.type || "short-term",
-      notes: issue.notes || ""
+      notes: issue.notes || "",
+      rockId: issue.rockId || ""
     });
     setModal("issue");
   };
@@ -649,6 +718,7 @@ function IssuesPage({ issues, setIssues, team, activeMemberIds }) {
       owner: form.owner,
       type: form.type,
       notes: form.notes,
+      rockId: form.rockId || null,
       done: false
     };
 
@@ -658,6 +728,21 @@ function IssuesPage({ issues, setIssues, team, activeMemberIds }) {
       setIssues(prev => [...prev, { id: uid(), ...payload, createdAt: new Date().toISOString() }]);
     }
     setModal(null);
+  };
+
+  const createTodoFromIssue = issue => {
+    const d = new Date();
+    d.setDate(d.getDate() + 7);
+    setTodos(prev => [...prev, {
+      id: uid(),
+      title: issue.title,
+      owner: issue.owner,
+      dueDate: d.toISOString().split("T")[0],
+      done: false,
+      rockId: issue.rockId || null,
+      sourceIssueId: issue.id,
+      createdAt: new Date().toISOString()
+    }]);
   };
 
   const setSolved = (id, done) => {
@@ -735,6 +820,7 @@ function IssuesPage({ issues, setIssues, team, activeMemberIds }) {
                   <td onClick={() => setSelectedId(issue.id)} style={{ cursor: "pointer" }}>
                     <div style={{ fontWeight: 600, color: issue.done ? "var(--t3)" : "var(--t1)", textDecoration: issue.done ? "line-through" : "none" }}>{issue.title}</div>
                     {!!issue.notes && <div style={{ fontSize: 12, color: "var(--t3)", marginTop: 2 }}>{issue.notes.slice(0, 110)}{issue.notes.length > 110 ? "..." : ""}</div>}
+                    {issue.rockId && rocks.find(r => r.id === issue.rockId) && <span className="tag" style={{ marginTop: 4, display: "inline-block" }}>{rocks.find(r => r.id === issue.rockId).title}</span>}
                   </td>
                   <td><Av m={m} /></td>
                   <td><button className="btn-ghost" onClick={() => openEdit(issue)}>Edit</button></td>
@@ -751,9 +837,10 @@ function IssuesPage({ issues, setIssues, team, activeMemberIds }) {
           <div style={{ fontSize: 11, color: "var(--t3)", textTransform: "uppercase", fontWeight: 700, letterSpacing: ".05em" }}>Title</div>
           <div style={{ marginTop: 6, fontSize: 15, fontWeight: 600 }}>{selected.title}</div>
 
-          <div style={{ display: "flex", gap: 10, marginTop: 14, alignItems: "center" }}>
+          <div style={{ display: "flex", gap: 10, marginTop: 14, alignItems: "center", flexWrap: "wrap" }}>
             <span className={`status ${selected.done ? "status-on" : "status-off"}`}>{selected.done ? "Solved" : "Open"}</span>
             <span style={{ fontSize: 12, color: "var(--t2)" }}>{(selected.type || "short-term") === "short-term" ? "Short-Term" : "Long-Term"}</span>
+            {selected.rockId && rocks.find(r => r.id === selected.rockId) && <span className="tag">{rocks.find(r => r.id === selected.rockId).title}</span>}
           </div>
 
           <div style={{ marginTop: 16 }}>
@@ -766,9 +853,12 @@ function IssuesPage({ issues, setIssues, team, activeMemberIds }) {
             />
           </div>
 
-          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+          <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
             <button className="btn" onClick={() => setSolved(selected.id, !selected.done)}>{selected.done ? "Reopen" : "Mark solved"}</button>
             <button className="btn" onClick={() => openEdit(selected)}>Edit metadata</button>
+            {todos.some(t => t.sourceIssueId === selected.id)
+              ? <span style={{ fontSize: 12, color: "var(--t3)", alignSelf: "center" }}>✓ To-do created</span>
+              : <button className="btn" onClick={() => createTodoFromIssue(selected)}><Ic.Plus /> Create to-do</button>}
           </div>
         </div>}
       </div>
@@ -795,6 +885,14 @@ function IssuesPage({ issues, setIssues, team, activeMemberIds }) {
               <option value="long-term">Long-Term</option>
             </select>
           </div>
+        </div>
+
+        <div className="field">
+          <label>Linked rock (optional)</label>
+          <select value={form.rockId} onChange={e => setForm({ ...form, rockId: e.target.value })}>
+            <option value="">None</option>
+            {rocks.map(r => <option key={r.id} value={r.id}>{r.title}</option>)}
+          </select>
         </div>
 
         <div className="field" style={{ marginBottom: 0 }}>
@@ -1565,10 +1663,10 @@ export default function App() {
         </button>
       </div>
       {page === "dashboard" && <DashboardPage {...{ todos, setTodos, rocks, issues, scorecard, scData, team, activeMemberIds, setPage }} />}
-      {page === "todos" && <TodosPage {...{ todos, setTodos, team, activeMemberIds }} />}
+      {page === "todos" && <TodosPage {...{ todos, setTodos, team, activeMemberIds, rocks }} />}
       {page === "scorecard" && <ScorecardPage {...{ scorecard, setScorecard, scData, setScData, team, activeMemberIds, mob }} />}
-      {page === "rocks" && <RocksPage {...{ rocks, setRocks, team, activeMemberIds }} />}
-      {page === "issues" && <IssuesPage {...{ issues, setIssues, team, activeMemberIds }} />}
+      {page === "rocks" && <RocksPage {...{ rocks, setRocks, team, activeMemberIds, issues, todos }} />}
+      {page === "issues" && <IssuesPage {...{ issues, setIssues, team, activeMemberIds, rocks, todos, setTodos }} />}
       {page === "meetings" && <MeetingsPage {...{ meetings, setMeetings, issues, todos, team, activeMemberIds }} />}
       {page === "headlines" && <HeadlinesPage {...{ headlines, setHeadlines, team, activeMemberIds }} />}
       {page === "vision" && <VisionPage {...{ vision, setVision }} />}

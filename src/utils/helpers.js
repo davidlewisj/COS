@@ -118,6 +118,12 @@ export function parseLines(text) {
     .filter(Boolean);
 }
 
+// Completion progress for a rock's milestones
+export function milestoneProgress(milestones) {
+  const list = Array.isArray(milestones) ? milestones : [];
+  return { done: list.filter(m => m.done).length, total: list.length };
+}
+
 // Current quarter label, e.g. "Q1 2026"
 export function currentQuarterLabel(offset = 0) {
   const now = new Date();
