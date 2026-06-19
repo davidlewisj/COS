@@ -31,25 +31,6 @@ export const EmptySVG = {
 
 // Dashboard sub-components
 
-export function GaugeChart({ value, max, label }) {
-  const pct = max === 0 ? 0 : Math.min(value / max, 1);
-  const R = 54, cx = 70, cy = 70;
-  const startAngle = Math.PI, sweep = Math.PI;
-  const angle = startAngle + sweep * pct;
-  const x1 = cx + R * Math.cos(startAngle), y1 = cy + R * Math.sin(startAngle);
-  const x2 = cx + R * Math.cos(angle), y2 = cy + R * Math.sin(angle);
-  const large = pct > 0.5 ? 1 : 0;
-  const color = pct >= 0.8 ? "#10B981" : pct >= 0.5 ? "#F59E0B" : "#EF4444";
-  return (
-    <svg width="140" height="80" viewBox="0 0 140 80">
-      <path d={`M ${cx - R} ${cy} A ${R} ${R} 0 0 1 ${cx + R} ${cy}`} fill="none" stroke="#E5E7EB" strokeWidth="10" strokeLinecap="round"/>
-      {pct > 0 && <path d={`M ${x1} ${y1} A ${R} ${R} 0 ${large} 1 ${x2} ${y2}`} fill="none" stroke={color} strokeWidth="10" strokeLinecap="round"/>}
-      <text x={cx} y={cy - 4} textAnchor="middle" fontSize="22" fontWeight="700" fill="#111827">{value}</text>
-      <text x={cx} y={cy + 14} textAnchor="middle" fontSize="10" fill="#9CA3AF">of {max}</text>
-    </svg>
-  );
-}
-
 export function DonutChart({ hits, total }) {
   const pct = total === 0 ? 0 : hits / total;
   const R = 28, cx = 36, cy = 36, circ = 2 * Math.PI * R;
