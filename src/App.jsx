@@ -1142,26 +1142,37 @@ function ProcessesPage({ processes, setProcesses, team, activeMemberIds }) {
   </>;
 }
 
-function MeetingsPage({ meetings, setMeetings, issues, todos, team, activeMemberIds }) {
-  const store = meetings && typeof meetings === "object" ? meetings : {};
-  const defaultMeetingRef = useRef({
+const MEETING_SECTION_LABELS = [
+  ["segue", "1. Segue"],
+  ["scorecard", "2. Scorecard"],
+  ["rocks", "3. Rocks"],
+  ["customerEmployee", "4. Customer/Employee Headlines"],
+  ["todoReview", "5. To-Do Review"],
+  ["ids", "6. IDS (Identify, Discuss, Solve)"]
+];
+
+function freshMeetingState() {
+  return {
     title: "Weekly Level 10",
     date: new Date().toISOString().slice(0, 10),
-    sections: {
-      segue: "",
-      scorecard: "",
-      rocks: "",
-      customerEmployee: "",
-      todoReview: "",
-      ids: ""
-    },
+    sections: { segue: "", scorecard: "", rocks: "", customerEmployee: "", todoReview: "", ids: "" },
     tangents: [],
     timerSeconds: 0
-  });
+  };
+}
+
+function MeetingsPage({ meetings, setMeetings, issues, todos, team, activeMemberIds }) {
+  const store = meetings && typeof meetings === "object" ? meetings : {};
+  const defaultMeetingRef = useRef(freshMeetingState());
   const mState = store.current || defaultMeetingRef.current;
+  const history = store.history || [];
 
   const [running, setRunning] = useState(false);
   const [tangentText, setTangentText] = useState("");
+  const [tab, setTab] = useState("run");
+  const [modal, setModal] = useState(null);
+  const [rating, setRating] = useState(null);
+  const [selectedHistoryId, setSelectedHistoryId] = useState(null);
 
   useEffect(() => {
     if (!running) return undefined;
@@ -1199,27 +1210,56 @@ function MeetingsPage({ meetings, setMeetings, issues, todos, team, activeMember
     setRunning(false);
     setMeetings(prev => {
       const base = prev && typeof prev === "object" ? prev : {};
-      return {
-        ...base,
-        current: {
-          title: "Weekly Level 10",
-          date: new Date().toISOString().slice(0, 10),
-          sections: { segue: "", scorecard: "", rocks: "", customerEmployee: "", todoReview: "", ids: "" },
-          tangents: [],
-          timerSeconds: 0
-        }
-      };
+      return { ...base, current: freshMeetingState() };
     });
   };
 
-  const seconds = mState.timerSeconds || 0;
-  const hh = String(Math.floor(seconds / 3600)).padStart(2, "0");
-  const mm = String(Math.floor((seconds % 3600) / 60)).padStart(2, "0");
-  const ss = String(seconds % 60).padStart(2, "0");
+  const openEndMeeting = () => {
+    setRating(null);
+    setModal("end");
+  };
+
+  const confirmEndMeeting = () => {
+    if (!rating) return;
+    setRunning(false);
+    setMeetings(prev => {
+      const base = prev && typeof prev === "object" ? prev : {};
+      const cur = base.current || mState;
+      const archived = {
+        id: uid(),
+        title: cur.title || "Weekly Level 10",
+        date: cur.date || new Date().toISOString().slice(0, 10),
+        sections: cur.sections || {},
+        tangents: cur.tangents || [],
+        durationSeconds: cur.timerSeconds || 0,
+        rating,
+        endedAt: new Date().toISOString()
+      };
+      return { ...base, history: [archived, ...(base.history || [])], current: freshMeetingState() };
+    });
+    setModal(null);
+  };
+
+  const removeHistoryMeeting = id => {
+    setMeetings(prev => {
+      const base = prev && typeof prev === "object" ? prev : {};
+      return { ...base, history: (base.history || []).filter(h => h.id !== id) };
+    });
+    if (selectedHistoryId === id) setSelectedHistoryId(null);
+  };
+
+  const fmtDuration = s => {
+    const sec = s || 0;
+    const hh = String(Math.floor(sec / 3600)).padStart(2, "0");
+    const mm = String(Math.floor((sec % 3600) / 60)).padStart(2, "0");
+    const ss = String(sec % 60).padStart(2, "0");
+    return `${hh}:${mm}:${ss}`;
+  };
 
   const openIssues = issues.filter(i => !i.done && activeMemberIds.includes(i.owner));
   const openTodos = todos.filter(t => !t.done && activeMemberIds.includes(t.owner));
   const tangents = mState.tangents || [];
+  const selectedHistory = history.find(h => h.id === selectedHistoryId) || null;
 
   return <>
     <div className="phdr">
@@ -1228,15 +1268,20 @@ function MeetingsPage({ meetings, setMeetings, issues, todos, team, activeMember
           <h1>Meetings</h1>
           <div className="phdr-desc">Run your Level 10 meeting with structured sections, timer, IDS notes, and tangents.</div>
         </div>
-        <div className="phdr-actions" style={{ gap: 10 }}>
-          <div style={{ fontSize: 20, fontWeight: 700, letterSpacing: ".03em", minWidth: 110, textAlign: "right" }}>{hh}:{mm}:{ss}</div>
+        {tab === "run" && <div className="phdr-actions" style={{ gap: 10 }}>
+          <div style={{ fontSize: 20, fontWeight: 700, letterSpacing: ".03em", minWidth: 110, textAlign: "right" }}>{fmtDuration(mState.timerSeconds || 0)}</div>
           <button className="btn" onClick={() => setRunning(r => !r)}>{running ? "Pause" : "Start"}</button>
           <button className="btn" onClick={clearMeeting}>Reset</button>
-        </div>
+          <button className="btn btn-p" onClick={openEndMeeting}>End meeting</button>
+        </div>}
+      </div>
+      <div className="tabs">
+        <div className={`tab${tab === "run" ? " on" : ""}`} onClick={() => setTab("run")}>Run Meeting</div>
+        <div className={`tab${tab === "history" ? " on" : ""}`} onClick={() => setTab("history")}>History</div>
       </div>
     </div>
 
-    <div className="content"><div className="content-inner" style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 16 }}>
+    {tab === "run" && <div className="content"><div className="content-inner" style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 16 }}>
       <div>
         <div className="sec">
           <div className="sec-hdr"><h2>Meeting Setup</h2></div>
@@ -1329,7 +1374,84 @@ function MeetingsPage({ meetings, setMeetings, issues, todos, team, activeMember
           </div>
         </div>
       </div>
-    </div></div>
+    </div></div>}
+
+    {tab === "history" && <div className="content"><div className="content-inner" style={{ display: "grid", gridTemplateColumns: "1fr minmax(280px, 380px)", gap: 16 }}>
+      <div className="sec" style={{ marginBottom: 0 }}>
+        <div className="sec-hdr"><h2>Past Meetings<span className="count">{history.length}</span></h2></div>
+        {history.length === 0 ? <div className="empty"><h3>No meeting history yet</h3><p>End a meeting to save it here with a rating.</p></div> : (
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Title</th>
+                <th style={{ width: 90 }}>Duration</th>
+                <th style={{ width: 90 }}>Rating</th>
+                <th style={{ width: 70 }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {history.map(h => {
+                const active = selectedHistoryId === h.id;
+                const ratingCls = h.rating >= 8 ? "status-on" : h.rating >= 5 ? "status-warn" : "status-off";
+                return <tr key={h.id} style={active ? { background: "var(--blue-l)" } : {}}>
+                  <td onClick={() => setSelectedHistoryId(h.id)} style={{ cursor: "pointer" }}>{fmtDate(h.date)}</td>
+                  <td onClick={() => setSelectedHistoryId(h.id)} style={{ cursor: "pointer", fontWeight: 600 }}>{h.title}</td>
+                  <td style={{ color: "var(--t2)" }}>{fmtDuration(h.durationSeconds)}</td>
+                  <td><span className={`status ${ratingCls}`}>{h.rating}/10</span></td>
+                  <td><button className="btn-ghost" onClick={() => removeHistoryMeeting(h.id)}>Delete</button></td>
+                </tr>;
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="sec" style={{ marginBottom: 0 }}>
+        <div className="sec-hdr"><h2>Details</h2></div>
+        {!selectedHistory ? <div className="empty" style={{ padding: "30px 16px" }}><p>Select a meeting to view its notes.</p></div> : <div style={{ padding: "16px 20px" }}>
+          <div style={{ fontSize: 11, color: "var(--t3)", textTransform: "uppercase", fontWeight: 700, letterSpacing: ".05em" }}>Meeting</div>
+          <div style={{ marginTop: 6, fontSize: 15, fontWeight: 600 }}>{selectedHistory.title}</div>
+
+          <div style={{ display: "flex", gap: 10, marginTop: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <span style={{ fontSize: 12, color: "var(--t2)" }}>{fmtDate(selectedHistory.date)}</span>
+            <span style={{ fontSize: 12, color: "var(--t2)" }}>Duration: {fmtDuration(selectedHistory.durationSeconds)}</span>
+            <span className={`status ${selectedHistory.rating >= 8 ? "status-on" : selectedHistory.rating >= 5 ? "status-warn" : "status-off"}`}>{selectedHistory.rating}/10</span>
+          </div>
+
+          {MEETING_SECTION_LABELS.map(([key, label]) => selectedHistory.sections?.[key] ? (
+            <div key={key} style={{ marginTop: 14 }}>
+              <div style={{ fontSize: 11, color: "var(--t3)", textTransform: "uppercase", fontWeight: 700, letterSpacing: ".05em" }}>{label}</div>
+              <div style={{ marginTop: 6, fontSize: 13, color: "var(--t1)", whiteSpace: "pre-wrap" }}>{selectedHistory.sections[key]}</div>
+            </div>
+          ) : null)}
+
+          {(selectedHistory.tangents || []).length > 0 && <div style={{ marginTop: 14 }}>
+            <div style={{ fontSize: 11, color: "var(--t3)", textTransform: "uppercase", fontWeight: 700, letterSpacing: ".05em" }}>Tangents</div>
+            <ul style={{ marginTop: 6, paddingLeft: 18, fontSize: 13 }}>
+              {selectedHistory.tangents.map(tg => <li key={tg.id}>{tg.title}</li>)}
+            </ul>
+          </div>}
+        </div>}
+      </div>
+    </div></div>}
+
+    {modal === "end" && <Modal title="End meeting" onClose={() => setModal(null)}>
+      <div className="modal-body">
+        <div className="field" style={{ marginBottom: 0 }}>
+          <label>Rate this meeting (1-10)</label>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+            {Array.from({ length: 10 }, (_, i) => i + 1).map(n => (
+              <button key={n} type="button" className={`btn btn-sm${rating === n ? " btn-p" : ""}`} onClick={() => setRating(n)}>{n}</button>
+            ))}
+          </div>
+        </div>
+      </div>
+      <div className="modal-foot">
+        <button className="btn" onClick={() => setModal(null)}>Cancel</button>
+        <button className="btn btn-p" onClick={confirmEndMeeting} disabled={!rating}>Save & end meeting</button>
+      </div>
+    </Modal>}
   </>;
 }
 function HeadlinesPage({ headlines, setHeadlines, team, activeMemberIds }) {
@@ -1738,7 +1860,7 @@ function TeamPage({ team, setTeam, teams, setTeams }) {
   </>;
 }
 
-function ProfilePage({ profile, setProfile }) {
+function ProfilePage({ profile, setProfile, onExportBackup, onImportBackup }) {
   const initials = `${(profile.firstName || "").slice(0, 1)}${(profile.lastName || "").slice(0, 1)}`.toUpperCase() || "U";
 
   const setField = (k, v) => setProfile(prev => ({ ...prev, [k]: v }));
@@ -1762,25 +1884,41 @@ function ProfilePage({ profile, setProfile }) {
           <div style={{ padding: "14px 16px", fontSize: 12, color: "var(--t2)" }}>Use a square image for best results.</div>
         </div>
 
-        <div className="profile-card">
-          <div className="profile-section-title">Identity</div>
-          <div style={{ padding: "16px 20px" }}>
-            <div style={{ display: "flex", gap: 12 }}>
-              <div className="field" style={{ flex: 1 }}><label>First name</label><input value={profile.firstName || ""} onChange={e => setField("firstName", e.target.value)} /></div>
-              <div className="field" style={{ flex: 1 }}><label>Last name</label><input value={profile.lastName || ""} onChange={e => setField("lastName", e.target.value)} /></div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+          <div className="profile-card">
+            <div className="profile-section-title">Identity</div>
+            <div style={{ padding: "16px 20px" }}>
+              <div style={{ display: "flex", gap: 12 }}>
+                <div className="field" style={{ flex: 1 }}><label>First name</label><input value={profile.firstName || ""} onChange={e => setField("firstName", e.target.value)} /></div>
+                <div className="field" style={{ flex: 1 }}><label>Last name</label><input value={profile.lastName || ""} onChange={e => setField("lastName", e.target.value)} /></div>
+              </div>
+              <div className="field"><label>Title</label><input value={profile.title || ""} onChange={e => setField("title", e.target.value)} /></div>
+              <div className="field" style={{ marginBottom: 0 }}><label>Bio</label><textarea rows={6} value={profile.bio || ""} onChange={e => setField("bio", e.target.value)} placeholder="Share your background and responsibilities" /></div>
             </div>
-            <div className="field"><label>Title</label><input value={profile.title || ""} onChange={e => setField("title", e.target.value)} /></div>
-            <div className="field" style={{ marginBottom: 0 }}><label>Bio</label><textarea rows={6} value={profile.bio || ""} onChange={e => setField("bio", e.target.value)} placeholder="Share your background and responsibilities" /></div>
+            <div className="profile-section-title">Address</div>
+            <div style={{ padding: "16px 20px" }}>
+              <div className="field"><label>Street</label><input value={profile.street || ""} onChange={e => setField("street", e.target.value)} /></div>
+              <div style={{ display: "flex", gap: 12 }}>
+                <div className="field" style={{ flex: 2 }}><label>City</label><input value={profile.city || ""} onChange={e => setField("city", e.target.value)} /></div>
+                <div className="field" style={{ flex: 1 }}><label>State</label><input value={profile.state || ""} onChange={e => setField("state", e.target.value)} /></div>
+                <div className="field" style={{ flex: 1 }}><label>Zip</label><input value={profile.zip || ""} onChange={e => setField("zip", e.target.value)} /></div>
+              </div>
+              <div className="field" style={{ marginBottom: 0 }}><label>Country</label><input value={profile.country || ""} onChange={e => setField("country", e.target.value)} /></div>
+            </div>
           </div>
-          <div className="profile-section-title">Address</div>
-          <div style={{ padding: "16px 20px" }}>
-            <div className="field"><label>Street</label><input value={profile.street || ""} onChange={e => setField("street", e.target.value)} /></div>
-            <div style={{ display: "flex", gap: 12 }}>
-              <div className="field" style={{ flex: 2 }}><label>City</label><input value={profile.city || ""} onChange={e => setField("city", e.target.value)} /></div>
-              <div className="field" style={{ flex: 1 }}><label>State</label><input value={profile.state || ""} onChange={e => setField("state", e.target.value)} /></div>
-              <div className="field" style={{ flex: 1 }}><label>Zip</label><input value={profile.zip || ""} onChange={e => setField("zip", e.target.value)} /></div>
+
+          <div className="profile-card">
+            <div className="profile-section-title">Data Backup</div>
+            <div style={{ padding: "16px 20px" }}>
+              <div style={{ fontSize: 13, color: "var(--t2)", marginBottom: 12 }}>Export a full backup of your data, or restore from a previous backup file. Restoring replaces all data currently stored in this browser.</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="btn" onClick={onExportBackup}>Export backup (JSON)</button>
+                <label className="btn" style={{ cursor: "pointer" }}>
+                  Import backup
+                  <input type="file" accept="application/json" style={{ display: "none" }} onChange={e => { const f = e.target.files?.[0]; if (f) onImportBackup(f); e.target.value = ""; }} />
+                </label>
+              </div>
             </div>
-            <div className="field" style={{ marginBottom: 0 }}><label>Country</label><input value={profile.country || ""} onChange={e => setField("country", e.target.value)} /></div>
           </div>
         </div>
       </div>
@@ -1849,6 +1987,51 @@ export default function App() {
   useEffect(() => { if (loaded) save(STORAGE_KEYS.peopleAnalyzer, peopleAnalyzer); }, [peopleAnalyzer, loaded]);
   useEffect(() => { if (loaded) save(STORAGE_KEYS.processes, processes); }, [processes, loaded]);
 
+  const exportBackup = () => {
+    const payload = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      data: { todos, scorecard, scData, meetings, issues, team, teams, rocks, headlines, vision, profile, seats, peopleAnalyzer, processes }
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `eos-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importBackup = file => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      let data;
+      try {
+        const parsed = JSON.parse(String(reader.result));
+        data = parsed.data || parsed;
+      } catch {
+        window.alert("Could not read backup file. Make sure it's a valid export from this app.");
+        return;
+      }
+      if (!window.confirm("This will replace all data currently stored in this browser with the contents of the backup file. Continue?")) return;
+      setTodos(data.todos || []);
+      setScorecard(data.scorecard || SC_DEFAULT);
+      setScData(data.scData || {});
+      setMeetings(data.meetings || {});
+      setIssues(data.issues || []);
+      setTeam(data.team || TEAM_DEFAULT);
+      setTeams(data.teams || TEAMS_DEFAULT);
+      setRocks(data.rocks || []);
+      setHeadlines(data.headlines || []);
+      setVision(data.vision || VISION_DEFAULT);
+      setProfile(data.profile || PROFILE_DEFAULT);
+      setSeats(data.seats || SEATS_DEFAULT);
+      setPeopleAnalyzer(data.peopleAnalyzer || PEOPLE_ANALYZER_DEFAULT);
+      setProcesses(data.processes || []);
+    };
+    reader.readAsText(file);
+  };
+
   if (!loaded) return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: "#F8F9FA", color: "#9CA3AF" }}><style>{CSS}</style>Loading...</div>;
 
   const activeTeam = teams.find(t => t.id === activeTeamId);
@@ -1905,7 +2088,7 @@ export default function App() {
       {page === "vision" && <VisionPage {...{ vision, setVision }} />}
       {page === "accountability" && <AccountabilityChartPage {...{ seats, setSeats, team, vision, peopleAnalyzer, setPeopleAnalyzer }} />}
       {page === "team" && <TeamPage {...{ team, setTeam, teams, setTeams }} />}
-      {page === "profile" && <ProfilePage {...{ profile, setProfile }} />}
+      {page === "profile" && <ProfilePage {...{ profile, setProfile, onExportBackup: exportBackup, onImportBackup: importBackup }} />}
     </div>
     {mob && <div className="bnav">
       {navMain.slice(0, 5).map(n => (<div key={n.id} className={`bnav-i${page === n.id ? " on" : ""}`} onClick={() => setPage(n.id)}>{n.icon}<span>{n.label}</span>{n.id === "todos" && activeTodos > 0 && <span className="bbdg">{activeTodos}</span>}{n.id === "issues" && openIssues > 0 && <span className="bbdg">{openIssues}</span>}</div>))}
