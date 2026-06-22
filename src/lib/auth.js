@@ -27,11 +27,17 @@ export async function signOut() {
 }
 
 // Active org membership for the signed-in user, joined with the org name.
+// Must filter by user_id -- org_members_select lets a member see every
+// active row in their org, not just their own, so without this filter a
+// fellow member's row (wrong role) could come back instead.
 export async function getMembership() {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
   const { data, error } = await supabase
     .from("org_members")
     .select("org_id, role, status, organizations(id, name)")
     .eq("status", "active")
+    .eq("user_id", user.id)
     .limit(1)
     .maybeSingle();
   if (error) throw error;
