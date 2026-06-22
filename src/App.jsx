@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
-import { STORAGE_KEYS, PROFILE_DEFAULT, TEAM_DEFAULT, TEAMS_DEFAULT, SC_DEFAULT, VISION_DEFAULT, CSS } from "./constants";
-import { uid, getWeekRange, getPeriods, getRollupVal, scaleGoal, load, save, fmtDate, isOverdue } from "./utils/helpers";
+import { STORAGE_KEYS, PROFILE_DEFAULT, TEAM_DEFAULT, TEAMS_DEFAULT, SC_DEFAULT, VISION_DEFAULT, SEATS_DEFAULT, PEOPLE_ANALYZER_DEFAULT, CSS } from "./constants";
+import { uid, getWeekRange, getPeriods, getRollupVal, scaleGoal, parseLines, currentQuarterLabel, milestoneProgress, load, save, fmtDate, isOverdue } from "./utils/helpers";
 import { useIsMobile } from "./hooks/useIsMobile";
 import { Ic } from "./components/Icons";
 import { Av, CircleCk, Modal, EmptySVG, DonutChart, MiniBarChart } from "./components/Shared";
@@ -10,14 +10,14 @@ import { NotificationsPanel } from "./components/NotificationsPanel";
 function DashboardPage({ todos, setTodos, rocks, issues, scorecard, scData, team, activeMemberIds, setPage }) {
   const week = getWeekRange(0);
   const weeks52 = Array.from({ length: 52 }, (_, i) => getWeekRange(-i));
-  const me = team.find(m => activeMemberIds.includes(m.id) && m.name !== "Unassigned") || team[0];
+  const me = team.find(m => m.id === "1") || team[0];
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
 
   const teamTodos = todos.filter(t => !t.done && activeMemberIds.includes(t.owner));
   const activeRocks = rocks.filter(r => activeMemberIds.includes(r.owner) && r.status !== "completed" && r.status !== "cancelled");
   const activeScorecard = scorecard.filter(m => activeMemberIds.includes(m.owner));
-  const hits = activeScorecard.filter(m => { const v = parseFloat(scData[week.key]?.[m.id]); return !isNaN(v) && (m.op === ">=" ? v >= m.goal : v <= m.goal); }).length;
+  const hits = activeScorecard.filter(m => { const v = parseFloat(scData[week.key]?.[m.id]); return !isNaN(v) && v >= m.goal; }).length;
 
   const W = ({ title, count, action, children, minH }) => (
     <div className="dash-widget">
@@ -59,30 +59,25 @@ function DashboardPage({ todos, setTodos, rocks, issues, scorecard, scData, team
         </W>
         <W title="Rocks" count={activeRocks.length} action={() => setPage("rocks")} minH={120}>
           {activeRocks.length === 0 ? <div className="dash-empty"><EmptySVG.rocks /><p>No active rocks</p></div> : <div>
-            {activeRocks.slice(0, 5).map(r => (
-              <div key={r.id} className="dash-irow" style={{ borderBottom: "1px solid var(--brd)", padding: "7px 0" }}>
-                <RockStatusBadge rock={r} />
-                <span style={{ flex: 1, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.title}</span>
-                {r.dueDate && <span style={{ fontSize: 11, color: "var(--t2)", whiteSpace: "nowrap" }}>{fmtDate(r.dueDate)}</span>}
-              </div>
-            ))}
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <tbody>
+                {activeRocks.slice(0, 5).map(r => (
+                  <tr key={r.id} style={{ borderBottom: "1px solid var(--brd)" }}>
+                    <td style={{ padding: "8px 0" }}><RockStatusBadge rock={r} /></td>
+                    <td style={{ padding: "8px", fontSize: 13 }}>{r.title}</td>
+                    <td style={{ padding: "8px 0", fontSize: 12, color: "var(--t2)" }}>{fmtDate(r.dueDate)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>}
         </W>
-        {(() => {
-          const overdueTodos = teamTodos.filter(t => isOverdue(t.dueDate));
-          const doneTodos = todos.filter(t => t.done && activeMemberIds.includes(t.owner));
-          const total = teamTodos.length + doneTodos.length;
-          return <W title="To-Do Summary" minH={120}>
-            <div style={{ display: "flex", gap: 20, alignItems: "center", padding: "8px 0 12px" }}>
-              <DonutChart hits={doneTodos.length} total={Math.max(total, 1)} />
-              <div>
-                <div style={{ fontSize: 11, color: "var(--t2)" }}>Open / Total</div>
-                <div style={{ fontSize: 22, fontWeight: 700, marginTop: 2 }}>{teamTodos.length}<span style={{ fontSize: 14, color: "var(--t2)", fontWeight: 400 }}> / {total}</span></div>
-                {overdueTodos.length > 0 && <div style={{ fontSize: 11, color: "var(--red-t)", fontWeight: 600, marginTop: 4, display: "flex", alignItems: "center", gap: 4 }}><Ic.Warn />{overdueTodos.length} overdue</div>}
-              </div>
-            </div>
-          </W>;
-        })()}
+        <W title="To-Dos 90d" minH={120}>
+          <div style={{ display: "flex", gap: 20 }}>
+            <DonutChart hits={Math.min(teamTodos.length, 5)} total={Math.max(teamTodos.length, 5)} />
+            <div><div style={{ fontSize: 28, fontWeight: 700 }}>{teamTodos.length}</div><div style={{ fontSize: 12, color: "var(--t2)", marginTop: 2 }}>Open</div></div>
+          </div>
+        </W>
         <W title="Measurables" action={() => setPage("scorecard")} minH={100}>
           {activeScorecard.length === 0 ? <div className="dash-empty"><p>No measurables set up</p></div> : <div><MiniBarChart scorecard={activeScorecard} scData={scData} weeks={weeks52} /></div>}
         </W>
@@ -100,59 +95,50 @@ function DashboardPage({ todos, setTodos, rocks, issues, scorecard, scData, team
 }
 
 // TODOS PAGE
-function TodosPage({ todos, setTodos, team, activeMemberIds, myId }) {
-  const ownerableTeam = team.filter(m => m.name !== "Unassigned");
-  const defaultOwner = ownerableTeam[0]?.id || "";
+function TodosPage({ todos, setTodos, team, activeMemberIds, rocks }) {
   const [tab, setTab] = useState("team");
   const [search, setSearch] = useState("");
   const [archive, setArchive] = useState(false);
   const [ownerFilter, setOwnerFilter] = useState("all");
   const [modal, setModal] = useState(null);
   const [editId, setEditId] = useState(null);
-  const [form, setForm] = useState({ title: "", owner: defaultOwner, dueDate: "", notes: "" });
-
-  // Keyboard shortcut: N = new to-do
-  useEffect(() => {
-    const handler = e => {
-      if (e.key === "n" && !["INPUT","TEXTAREA","SELECT"].includes(e.target.tagName) && !modal) {
-        e.preventDefault(); openAdd();
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [modal]); // eslint-disable-line
+  const [form, setForm] = useState({ title: "", owner: "1", dueDate: "", rockId: "", notes: "" });
 
   const openAdd = () => {
     const d = new Date();
     d.setDate(d.getDate() + 7);
     setEditId(null);
-    setForm({ title: "", owner: myId || defaultOwner, dueDate: d.toISOString().split("T")[0], notes: "" });
+    setForm({ title: "", owner: "1", dueDate: d.toISOString().split("T")[0], rockId: "", notes: "" });
     setModal("todo");
   };
 
   const openEdit = todo => {
     setEditId(todo.id);
-    setForm({ title: todo.title || "", owner: todo.owner || defaultOwner, dueDate: todo.dueDate || "", notes: todo.notes || "" });
+    setForm({ title: todo.title || "", owner: todo.owner || "1", dueDate: todo.dueDate || "", rockId: todo.rockId || "", notes: todo.notes || "" });
     setModal("todo");
   };
 
   const saveTodo = () => {
     const title = form.title.trim();
     if (!title) return;
+    const payload = { title, owner: form.owner, dueDate: form.dueDate, rockId: form.rockId || null, notes: form.notes };
     if (editId) {
-      setTodos(p => p.map(x => x.id === editId ? { ...x, title, owner: form.owner, dueDate: form.dueDate, notes: form.notes } : x));
+      setTodos(p => p.map(x => (x.id === editId ? { ...x, ...payload } : x)));
     } else {
-      setTodos(p => [...p, { id: uid(), title, owner: form.owner, dueDate: form.dueDate, notes: form.notes, done: false, createdAt: new Date().toISOString() }]);
+      setTodos(p => [...p, { id: uid(), ...payload, done: false, createdAt: new Date().toISOString() }]);
     }
     setModal(null);
   };
 
-  const removeTodo = id => { setTodos(p => p.filter(x => x.id !== id)); setModal(null); };
+  const removeTodo = id => {
+    setTodos(p => p.filter(x => x.id !== id));
+    setModal(null);
+  };
 
   const filtered = todos.filter(t => {
     if (archive ? !t.done : t.done) return false;
     if (!activeMemberIds.includes(t.owner)) return false;
-    if (tab === "private" && t.owner !== (myId || "1")) return false;
+    if (tab === "private" && t.owner !== "1") return false;
     if (ownerFilter !== "all" && t.owner !== ownerFilter) return false;
     if (search && !t.title.toLowerCase().includes(search.toLowerCase())) return false;
     return true;
@@ -169,7 +155,7 @@ function TodosPage({ todos, setTodos, team, activeMemberIds, myId }) {
     <div className="toolbar">
       {tab === "team" && <select className="tb-filter" value={ownerFilter} onChange={e => setOwnerFilter(e.target.value)}>
         <option value="all">Owner: All</option>
-        {ownerableTeam.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+        {team.filter(m => m.id !== "2").map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
       </select>}
       <div className="tb-toggle" onClick={() => setArchive(!archive)}><div className={`tb-toggle-track${archive ? " on" : ""}`}><div className="tb-toggle-dot" /></div>Archive</div>
       <div className="tb-search"><Ic.Search /><input placeholder="Search To-Dos..." value={search} onChange={e => setSearch(e.target.value)} /></div>
@@ -177,29 +163,37 @@ function TodosPage({ todos, setTodos, team, activeMemberIds, myId }) {
     <div className="content"><div className="content-inner">
       <div className="sec">
         <div className="sec-hdr"><h2>To-Dos<span className="count">{filtered.length}</span></h2></div>
-        {filtered.length === 0 ? <div className="empty"><EmptySVG.todos /><h3>{archive ? "No archived to-dos" : "All caught up!"}</h3><p>Create a to-do to get started.</p></div> :
-          filtered.map(t => {
+        {filtered.length === 0 ? <div className="empty"><EmptySVG.todos /><h3>{archive ? "No archived to-dos" : "All caught up!"}</h3><p>Create a to-do to get started.</p></div> : <table className="tbl"><thead><tr><th style={{ width: 42 }}></th><th>Title</th><th style={{ width: 100 }}>Due By</th><th style={{ width: 70 }}>Owner</th><th style={{ width: 60 }}></th></tr></thead><tbody>
+          {filtered.map(t => {
             const m = team.find(x => x.id === t.owner) || team[1];
             const od = isOverdue(t.dueDate) && !t.done;
-            return <div key={t.id} className="irow">
-              <CircleCk on={t.done} toggle={() => setTodos(p => p.map(x => x.id === t.id ? { ...x, done: !x.done } : x))} />
-              <div className={`itxt${t.done ? " dn" : ""}`} style={{ fontSize: 14 }}>{t.title}
+            const linkedRock = t.rockId && rocks.find(r => r.id === t.rockId);
+            return <tr key={t.id}>
+              <td><CircleCk on={t.done} toggle={() => setTodos(p => p.map(x => x.id === t.id ? { ...x, done: !x.done } : x))} /></td>
+              <td>{t.title}{linkedRock && <span className="tag" style={{ marginLeft: 8 }}>{linkedRock.title}</span>}
                 {!!t.notes && <div style={{ fontSize: 12, color: "var(--t3)", marginTop: 2 }}>{t.notes.slice(0, 90)}{t.notes.length > 90 ? "…" : ""}</div>}
-              </div>
-              {t.dueDate && <span style={{ fontSize: 12, color: od ? "var(--red-t)" : "var(--t2)", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 3 }}>{od && <Ic.Warn />}{fmtDate(t.dueDate)}</span>}
-              <Av m={m} size={24} />
-              <button className="btn-ghost" style={{ padding: "4px 6px" }} onClick={() => openEdit(t)}><Ic.More /></button>
-            </div>;
-          })
-        }
+              </td>
+              <td style={{ color: od ? "var(--red-t)" : "var(--t2)" }}>{od && <Ic.Warn />}{fmtDate(t.dueDate)}</td>
+              <td><Av m={m} /></td>
+              <td><button className="btn-ghost" onClick={() => openEdit(t)}>Edit</button></td>
+            </tr>;
+          })}
+        </tbody></table>}
       </div>
     </div></div>
     {modal === "todo" && <Modal title={editId ? "Edit To-Do" : "Create To-Do"} onClose={() => setModal(null)}>
       <div className="modal-body">
         <div className="field"><label>Title</label><input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="What needs to be done?" autoFocus /></div>
         <div style={{ display: "flex", gap: 12 }}>
-          <div className="field" style={{ flex: 1 }}><label>Owner</label><select value={form.owner} onChange={e => setForm({ ...form, owner: e.target.value })}>{ownerableTeam.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select></div>
+          <div className="field" style={{ flex: 1 }}><label>Owner</label><select value={form.owner} onChange={e => setForm({ ...form, owner: e.target.value })}>{team.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select></div>
           <div className="field" style={{ flex: 1 }}><label>Due Date</label><input type="date" value={form.dueDate} onChange={e => setForm({ ...form, dueDate: e.target.value })} /></div>
+        </div>
+        <div className="field">
+          <label>Linked rock (optional)</label>
+          <select value={form.rockId} onChange={e => setForm({ ...form, rockId: e.target.value })}>
+            <option value="">None</option>
+            {rocks.map(r => <option key={r.id} value={r.id}>{r.title}</option>)}
+          </select>
         </div>
         <div className="field" style={{ marginBottom: 0 }}><label>Notes</label><textarea rows={3} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} placeholder="Context or details" /></div>
       </div>
@@ -221,14 +215,7 @@ function ScorecardPage({ scorecard, setScorecard, scData, setScData, team, activ
   const [search, setSearch] = useState("");
   const [modal, setModal] = useState(null);
   const [editId, setEditId] = useState(null);
-  const fmtUnit = (val, unit) =>
-    unit === "$" ? `$${Number(val).toLocaleString()}` :
-    unit === "%" ? `${val}%` :
-    String(val);
-
-  const ownerableTeam = team.filter(m => m.name !== "Unassigned");
-  const defaultOwner = ownerableTeam[0]?.id || "";
-  const [form, setForm] = useState({ name: "", owner: defaultOwner, goal: 0, unit: "#", op: ">=" });
+  const [form, setForm] = useState({ name: "", owner: "1", goal: 0, unit: "#", op: ">=" });
   const cellRefs = useRef({});
 
   const allPeriods = getPeriods(tab);
@@ -242,20 +229,9 @@ function ScorecardPage({ scorecard, setScorecard, scData, setScData, team, activ
 
   const isWeekly = tab === "weekly";
 
-  // Keyboard shortcut: N = new metric
-  useEffect(() => {
-    const handler = e => {
-      if (e.key === "n" && !["INPUT","TEXTAREA","SELECT"].includes(e.target.tagName) && !modal) {
-        e.preventDefault(); openAdd();
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [modal]); // eslint-disable-line
-
   const openAdd = () => {
     setEditId(null);
-    setForm({ name: "", owner: defaultOwner, goal: 0, unit: "#", op: ">=" });
+    setForm({ name: "", owner: "1", goal: 0, unit: "#", op: ">=" });
     setModal("metric");
   };
 
@@ -354,7 +330,7 @@ function ScorecardPage({ scorecard, setScorecard, scData, setScData, team, activ
     <div className="toolbar">
       <select className="tb-filter" value={ownerFilter} onChange={e => setOwnerFilter(e.target.value)}>
         <option value="all">Owner: All</option>
-        {ownerableTeam.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+        {team.filter(m => m.id !== "2").map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
       </select>
       <div className="tb-search">
         <Ic.Search />
@@ -367,13 +343,7 @@ function ScorecardPage({ scorecard, setScorecard, scData, setScData, team, activ
         <div className="sec" style={{ overflow: "visible" }}>
           <div className="sec-hdr">
             <h2>Measurables<span className="count">{filtered.length}</span></h2>
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, color: "var(--green-t)" }}><span style={{ width: 8, height: 8, borderRadius: 2, background: "var(--green)", display: "inline-block" }} />Hit</span>
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, color: "var(--red-t)" }}><span style={{ width: 8, height: 8, borderRadius: 2, background: "var(--red)", display: "inline-block" }} />Miss</span>
-              </div>
-              {isWeekly && <div style={{ fontSize: 11, color: "var(--t3)" }}>Arrow keys to navigate · <kbd style={{ background: "var(--bg2)", border: "1px solid var(--brd2)", borderRadius: 4, padding: "1px 5px", fontSize: 10, fontFamily: "monospace" }}>N</kbd> to add</div>}
-            </div>
+            {isWeekly && <div style={{ fontSize: 12, color: "var(--t2)" }}>Tip: Use arrow keys or Enter to move across cells</div>}
           </div>
 
           {filtered.length === 0 ? <div className="empty"><h3>No measurables</h3><p>Add your first measurable to start tracking performance.</p></div> : (
@@ -388,7 +358,7 @@ function ScorecardPage({ scorecard, setScorecard, scData, setScData, team, activ
                   return <div className="sc-row" key={metric.id}>
                     <div className="sc-name-cell" onClick={() => openEdit(metric)}>
                       <span>{metric.name}</span>
-                      <span className="sc-info">{metric.op} {fmtUnit(metric.goal, metric.unit)}</span>
+                      <span className="sc-info">{metric.op} {metric.goal}{metric.unit}</span>
                     </div>
 
                     {periods.map((p, colIndex) => {
@@ -398,13 +368,7 @@ function ScorecardPage({ scorecard, setScorecard, scData, setScData, team, activ
                         const hasVal = rawVal !== "" && !Number.isNaN(nVal);
                         const hit = hasVal && (metric.op === ">=" ? nVal >= metric.goal : nVal <= metric.goal);
                         const miss = hasVal && !hit;
-                        // Trend vs previous week
-                        const prevKey = allPeriods[colIndex + 1]?.key;
-                        const prevRaw = prevKey ? (scData[prevKey]?.[metric.id] ?? "") : "";
-                        const prevVal = parseFloat(prevRaw);
-                        const hasPrev = prevRaw !== "" && !Number.isNaN(prevVal);
-                        const trend = hasVal && hasPrev ? (nVal > prevVal ? "up" : nVal < prevVal ? "down" : null) : null;
-                        return <div key={p.key} className={`sc-data${hit ? " sc-hit" : ""}${miss ? " sc-miss" : ""}`} style={{ position: "relative" }}>
+                        return <div key={p.key} className={`sc-data${hit ? " sc-hit" : ""}${miss ? " sc-miss" : ""}`}>
                           <input
                             ref={el => { cellRefs.current[`${rowIndex}-${colIndex}`] = el; }}
                             value={rawVal}
@@ -413,9 +377,6 @@ function ScorecardPage({ scorecard, setScorecard, scData, setScData, team, activ
                             inputMode="decimal"
                             placeholder="-"
                           />
-                          {trend && <span style={{ position: "absolute", top: 3, right: 4, pointerEvents: "none", opacity: 0.7 }}>
-                            {trend === "up" ? <Ic.TrendUp color={hit ? "var(--green-t)" : "var(--t3)"} /> : <Ic.TrendDown color={miss ? "var(--red-t)" : "var(--t3)"} />}
-                          </span>}
                         </div>;
                       }
 
@@ -426,7 +387,7 @@ function ScorecardPage({ scorecard, setScorecard, scData, setScData, team, activ
                       const miss = hasRollup && !hit;
 
                       return <div key={p.key} className={`sc-data${hit ? " sc-hit" : ""}${miss ? " sc-miss" : ""}`}>
-                        <span className="sc-rollup">{hasRollup ? fmtUnit(Number(rollup).toLocaleString(), metric.unit) : "-"}</span>
+                        <span className="sc-rollup">{hasRollup ? `${Number(rollup).toLocaleString()}${metric.unit}` : "-"}</span>
                       </div>;
                     })}
                   </div>;
@@ -451,7 +412,7 @@ function ScorecardPage({ scorecard, setScorecard, scData, setScData, team, activ
           <div className="field" style={{ flex: 1 }}>
             <label>Owner</label>
             <select value={form.owner} onChange={e => setForm({ ...form, owner: e.target.value })}>
-              {ownerableTeam.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+              {team.filter(m => m.id !== "2").map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
             </select>
           </div>
 
@@ -554,50 +515,33 @@ function RockStatusBadge({ rock, onChange }) {
   );
 }
 
-function RocksPage({ rocks, setRocks, team, activeMemberIds }) {
-  const ownerableTeam = team.filter(m => m.name !== "Unassigned");
-  const defaultOwner = ownerableTeam[0]?.id || "";
+// PLACEHOLDER PAGES
+function RocksPage({ rocks, setRocks, team, activeMemberIds, issues, todos }) {
   const [tab, setTab] = useState("active");
   const [search, setSearch] = useState("");
+  const [ownerFilter, setOwnerFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [modal, setModal] = useState(null);
   const [editId, setEditId] = useState(null);
-  const [form, setForm] = useState({ title: "", type: "company", owner: "company", assignees: [], dueDate: "", status: "on-track", quarter: "" });
-  const [expandedRocks, setExpandedRocks] = useState({});
-  const [milestoneInputs, setMilestoneInputs] = useState({});
-  const [quarterFilter, setQuarterFilter] = useState("current");
+  const [form, setForm] = useState({ title: "", owner: "1", dueDate: "", status: "on-track", quarter: "", milestones: [] });
+  const [msTitle, setMsTitle] = useState("");
+  const [msDue, setMsDue] = useState("");
 
   const now = new Date();
-  const qLabel = `Q${Math.floor(now.getMonth() / 3) + 1} ${now.getFullYear()}`;
+  const qNum = Math.floor(now.getMonth() / 3) + 1;
+  const qLabel = `Q${qNum} ${now.getFullYear()}`;
 
   const defaultDueDate = () => {
     const qEndMonth = Math.floor(now.getMonth() / 3) * 3 + 2;
-    return new Date(now.getFullYear(), qEndMonth + 1, 0).toISOString().split("T")[0];
+    const d = new Date(now.getFullYear(), qEndMonth + 1, 0);
+    return d.toISOString().split("T")[0];
   };
 
-  // Keyboard shortcut: N = new rock
-  useEffect(() => {
-    const handler = e => {
-      if (e.key === "n" && !["INPUT","TEXTAREA","SELECT"].includes(e.target.tagName) && !modal) {
-        e.preventDefault(); openAddCompany();
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [modal]); // eslint-disable-line
-
-  // Unique sorted quarters from all rocks, newest first
-  const allQuarters = [...new Set(rocks.map(r => r.quarter).filter(Boolean))].sort().reverse();
-
-  const openAddCompany = () => {
+  const openAdd = () => {
     setEditId(null);
-    setForm({ title: "", type: "company", owner: "company", assignees: [], dueDate: defaultDueDate(), status: "on-track", quarter: qLabel });
-    setModal("rock");
-  };
-
-  const openAddMember = memberId => {
-    setEditId(null);
-    setForm({ title: "", type: "individual", owner: memberId, assignees: [], dueDate: defaultDueDate(), status: "on-track", quarter: qLabel });
+    setForm({ title: "", owner: "1", dueDate: defaultDueDate(), status: "on-track", quarter: qLabel, milestones: [] });
+    setMsTitle("");
+    setMsDue("");
     setModal("rock");
   };
 
@@ -605,13 +549,14 @@ function RocksPage({ rocks, setRocks, team, activeMemberIds }) {
     setEditId(rock.id);
     setForm({
       title: rock.title || "",
-      type: rock.owner === "company" ? "company" : "individual",
-      owner: rock.owner || defaultOwner,
-      assignees: rock.assignees || [],
+      owner: rock.owner || "1",
       dueDate: rock.dueDate || defaultDueDate(),
       status: rock.status || "on-track",
-      quarter: rock.quarter || qLabel
+      quarter: rock.quarter || qLabel,
+      milestones: rock.milestones || []
     });
+    setMsTitle("");
+    setMsDue("");
     setModal("rock");
   };
 
@@ -620,11 +565,11 @@ function RocksPage({ rocks, setRocks, team, activeMemberIds }) {
     if (!title) return;
     const payload = {
       title,
-      owner: form.type === "company" ? "company" : form.owner,
-      assignees: form.type === "company" ? form.assignees : [],
+      owner: form.owner,
       dueDate: form.dueDate,
       status: form.status,
-      quarter: form.quarter || qLabel
+      quarter: form.quarter || qLabel,
+      milestones: form.milestones
     };
     if (editId) {
       setRocks(prev => prev.map(r => (r.id === editId ? { ...r, ...payload } : r)));
@@ -634,54 +579,45 @@ function RocksPage({ rocks, setRocks, team, activeMemberIds }) {
     setModal(null);
   };
 
-  const removeRock = id => { setRocks(prev => prev.filter(r => r.id !== id)); setModal(null); };
-  const setRockStatus = (id, status) => setRocks(prev => prev.map(r => (r.id === id ? { ...r, status } : r)));
-  const toggleAssignee = id => setForm(f => ({
-    ...f,
-    assignees: f.assignees.includes(id) ? f.assignees.filter(x => x !== id) : [...f.assignees, id]
-  }));
-
-  const toggleExpanded = id => setExpandedRocks(prev => ({ ...prev, [id]: !prev[id] }));
-
-  const addMilestone = (rockId, title) => {
-    const t = title.trim();
-    if (!t) return;
-    setRocks(prev => prev.map(r => r.id === rockId
-      ? { ...r, milestones: [...(r.milestones || []), { id: uid(), title: t, done: false }] }
-      : r
-    ));
-    setMilestoneInputs(prev => ({ ...prev, [rockId]: "" }));
+  const removeRock = id => {
+    setRocks(prev => prev.filter(r => r.id !== id));
+    setModal(null);
   };
 
-  const toggleMilestone = (rockId, milestoneId) => {
-    setRocks(prev => prev.map(r => r.id === rockId
-      ? { ...r, milestones: (r.milestones || []).map(m => m.id === milestoneId ? { ...m, done: !m.done } : m) }
-      : r
-    ));
+  const setRockStatus = (id, status) => {
+    setRocks(prev => prev.map(r => (r.id === id ? { ...r, status } : r)));
   };
 
-  const removeMilestone = (rockId, milestoneId) => {
-    setRocks(prev => prev.map(r => r.id === rockId
-      ? { ...r, milestones: (r.milestones || []).filter(m => m.id !== milestoneId) }
-      : r
-    ));
+  const addMilestone = () => {
+    const title = msTitle.trim();
+    if (!title) return;
+    setForm(prev => ({ ...prev, milestones: [...prev.milestones, { id: uid(), title, done: false, dueDate: msDue }] }));
+    setMsTitle("");
+    setMsDue("");
   };
 
-  const matchesFilter = r => {
-    const done = r.status === "completed" || r.status === "cancelled";
-    if (tab === "active" && done) return false;
-    if (tab === "completed" && !done) return false;
-    if (statusFilter !== "all" && r.status !== statusFilter) return false;
-    if (quarterFilter === "current" && r.quarter && r.quarter !== qLabel) return false;
-    if (quarterFilter !== "all" && quarterFilter !== "current" && r.quarter !== quarterFilter) return false;
-    if (search && !r.title.toLowerCase().includes(search.toLowerCase())) return false;
-    return true;
+  const toggleMilestone = id => {
+    setForm(prev => ({ ...prev, milestones: prev.milestones.map(m => (m.id === id ? { ...m, done: !m.done } : m)) }));
   };
 
-  const companyRocks = rocks.filter(r => r.owner === "company" && matchesFilter(r))
+  const removeMilestone = id => {
+    setForm(prev => ({ ...prev, milestones: prev.milestones.filter(m => m.id !== id) }));
+  };
+
+  const linkedIssues = editId ? issues.filter(i => i.rockId === editId) : [];
+  const linkedTodos = editId ? todos.filter(t => t.rockId === editId) : [];
+
+  const filtered = rocks
+    .filter(r => {
+      if (!activeMemberIds.includes(r.owner)) return false;
+      if (tab === "active" && (r.status === "completed" || r.status === "cancelled")) return false;
+      if (tab === "completed" && r.status !== "completed") return false;
+      if (ownerFilter !== "all" && r.owner !== ownerFilter) return false;
+      if (statusFilter !== "all" && r.status !== statusFilter) return false;
+      if (search && !r.title.toLowerCase().includes(search.toLowerCase())) return false;
+      return true;
+    })
     .sort((a, b) => (a.dueDate || "").localeCompare(b.dueDate || ""));
-
-  const visibleMembers = ownerableTeam.filter(m => activeMemberIds.includes(m.id));
 
   return <>
     <div className="phdr">
@@ -689,6 +625,9 @@ function RocksPage({ rocks, setRocks, team, activeMemberIds }) {
         <div>
           <h1>Rocks</h1>
           <div className="phdr-desc">Define and track quarterly priorities with clear ownership and status.</div>
+        </div>
+        <div className="phdr-actions">
+          <button className="btn btn-p" onClick={openAdd}><Ic.Plus /> Add rock</button>
         </div>
       </div>
       <div className="tabs">
@@ -698,10 +637,9 @@ function RocksPage({ rocks, setRocks, team, activeMemberIds }) {
     </div>
 
     <div className="toolbar">
-      <select className="tb-filter" value={quarterFilter} onChange={e => setQuarterFilter(e.target.value)}>
-        <option value="current">Quarter: {qLabel}</option>
-        <option value="all">Quarter: All</option>
-        {allQuarters.filter(q => q !== qLabel).map(q => <option key={q} value={q}>{q}</option>)}
+      <select className="tb-filter" value={ownerFilter} onChange={e => setOwnerFilter(e.target.value)}>
+        <option value="all">Owner: All</option>
+        {team.filter(m => m.id !== "2").map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
       </select>
       <select className="tb-filter" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
         <option value="all">Status: All</option>
@@ -717,173 +655,73 @@ function RocksPage({ rocks, setRocks, team, activeMemberIds }) {
     </div>
 
     <div className="content"><div className="content-inner">
-
-      {/* Company Rocks */}
       <div className="sec">
         <div className="sec-hdr">
-          <h2>Company Rocks<span className="count">{companyRocks.length}</span></h2>
-          <button className="btn" onClick={openAddCompany}><Ic.Plus /> Add</button>
+          <h2>Rocks<span className="count">{filtered.length}</span></h2>
         </div>
-        {companyRocks.length === 0
-          ? <div className="empty"><EmptySVG.rocks /><h3>No company rocks</h3><p>Add a company-wide rock and assign it to one or more team members.</p></div>
-          : <div>
-              {companyRocks.map(rock => {
-                const ms = rock.milestones || [];
-                const msDone = ms.filter(m => m.done).length;
-                const expanded = !!expandedRocks[rock.id];
-                const overdue = rock.status !== "completed" && rock.status !== "cancelled" && isOverdue(rock.dueDate);
-                const assignees = (rock.assignees || []).map(aid => team.find(x => x.id === aid)).filter(Boolean);
-                return (
-                  <div className="rock-row" key={rock.id}>
-                    <div className="rock-row-main" onClick={() => toggleExpanded(rock.id)}>
-                      <span className="rock-expand"><Ic.Chevron dir={expanded ? "down" : "right"} /></span>
-                      <RockStatusBadge rock={rock} onChange={setRockStatus} />
-                      <div className="rock-body">
-                        <div className="rock-title-line">
-                          <span className="rock-title-text">{rock.title}</span>
-                          {rock.quarter && <span className="rock-q-chip">{rock.quarter}</span>}
-                        </div>
-                        {ms.length > 0 && <div className="rock-ms-hint">
-                          <div className="rock-ms-bar"><div className="rock-ms-bar-fill" style={{ width: `${(msDone / ms.length) * 100}%` }} /></div>
-                          <span className="rock-ms-count-txt">{msDone}/{ms.length} milestones</span>
-                        </div>}
-                      </div>
-                      <div className="rock-row-right">
-                        {assignees.length > 0 && <div style={{ display: "flex", gap: 3 }}>{assignees.map(a => <Av key={a.id} m={a} size={22} />)}</div>}
-                        {rock.dueDate && <span className={`rock-due${overdue ? " overdue" : ""}`}>{overdue && <Ic.Warn />}{fmtDate(rock.dueDate)}</span>}
-                        <button className="btn-ghost" style={{ padding: "4px 6px", flexShrink: 0 }} onClick={e => { e.stopPropagation(); openEdit(rock); }}><Ic.More /></button>
-                      </div>
-                    </div>
-                    {expanded && <div className="rock-ms-panel">
-                      {ms.map(m => <div key={m.id} className="rock-ms-item">
-                        <CircleCk on={m.done} toggle={() => toggleMilestone(rock.id, m.id)} />
-                        <span className={`rock-ms-item-txt${m.done ? " done" : ""}`}>{m.title}</span>
-                        <button className="btn-ghost" style={{ fontSize: 17, lineHeight: 1, padding: "0 4px", color: "var(--t3)" }} onClick={() => removeMilestone(rock.id, m.id)}>×</button>
-                      </div>)}
-                      <div className="rock-ms-input-row">
-                        <input className="rock-ms-input" placeholder="+ Add milestone..." value={milestoneInputs[rock.id] || ""} onChange={e => setMilestoneInputs(p => ({ ...p, [rock.id]: e.target.value }))} onKeyDown={e => { if (e.key === "Enter") addMilestone(rock.id, milestoneInputs[rock.id] || ""); }} />
-                        {(milestoneInputs[rock.id] || "").trim() && <button className="btn btn-sm btn-p" onClick={() => addMilestone(rock.id, milestoneInputs[rock.id] || "")}>Add</button>}
-                      </div>
+
+        {filtered.length === 0 ? <div className="empty"><EmptySVG.rocks /><h3>No rocks found</h3><p>Create a rock to start the quarter with clear priorities.</p></div> : (
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>Title</th>
+                <th style={{ width: 130 }}>Milestones</th>
+                <th style={{ width: 110 }}>Quarter</th>
+                <th style={{ width: 110 }}>Due</th>
+                <th style={{ width: 90 }}>Owner</th>
+                <th style={{ width: 130 }}>Status</th>
+                <th style={{ width: 80 }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(rock => {
+                const m = team.find(x => x.id === rock.owner) || team[1];
+                const overdue = rock.status !== "completed" && isOverdue(rock.dueDate);
+                const { done: msDone, total: msTotal } = milestoneProgress(rock.milestones);
+                return <tr key={rock.id}>
+                  <td>{rock.title}</td>
+                  <td>
+                    {msTotal === 0 ? <span style={{ color: "var(--t3)" }}>-</span> : <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <div className="progress-bar"><div className="progress-fill" style={{ width: `${(msDone / msTotal) * 100}%` }} /></div>
+                      <span style={{ fontSize: 12, color: "var(--t2)", whiteSpace: "nowrap" }}>{msDone}/{msTotal}</span>
                     </div>}
-                  </div>
-                );
+                  </td>
+                  <td style={{ color: "var(--t2)" }}>{rock.quarter || "-"}</td>
+                  <td style={{ color: overdue ? "var(--red-t)" : "var(--t2)" }}>{overdue && <Ic.Warn />}{fmtDate(rock.dueDate)}</td>
+                  <td><Av m={m} /></td>
+                  <td>
+                    <RockStatusBadge rock={rock} onChange={setRockStatus} />
+                  </td>
+                  <td><button className="btn-ghost" onClick={() => openEdit(rock)}>Edit</button></td>
+                </tr>;
               })}
-            </div>
-        }
+            </tbody>
+          </table>
+        )}
       </div>
-
-      {/* Per-member sections */}
-      {visibleMembers.map(member => {
-        const isDone = r => r.status === "completed" || r.status === "cancelled";
-        const byDue = (a, b) => (a.dueDate || "").localeCompare(b.dueDate || "");
-        const activeRocks = rocks
-          .filter(r => r.owner === member.id && !isDone(r) && matchesFilter(r))
-          .sort(byDue);
-        // On the active tab, also show this-quarter done rocks greyed out at the bottom
-        const greyedRocks = tab === "active"
-          ? rocks
-              .filter(r => r.owner === member.id && isDone(r) && r.quarter === qLabel &&
-                (!search || r.title.toLowerCase().includes(search.toLowerCase())))
-              .sort(byDue)
-          : [];
-        const memberRocks = [...activeRocks, ...greyedRocks];
-
-        return <div className="sec" key={member.id}>
-          <div className="sec-hdr">
-            <h2 style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <Av m={member} size={24} />{member.name}<span className="count">{activeRocks.length}</span>
-            </h2>
-            <button className="btn" onClick={() => openAddMember(member.id)}><Ic.Plus /> Add</button>
-          </div>
-          {memberRocks.length === 0
-            ? <div className="empty" style={{ padding: "20px 16px" }}><p>No rocks assigned to {member.name.split(" ")[0]}.</p></div>
-            : <div>
-                {memberRocks.map(rock => {
-                  const greyed = isDone(rock);
-                  const overdue = !greyed && isOverdue(rock.dueDate);
-                  const ms = rock.milestones || [];
-                  const msDone = ms.filter(m => m.done).length;
-                  const expanded = !!expandedRocks[rock.id];
-                  return (
-                    <div className="rock-row" key={rock.id} style={greyed ? { opacity: 0.45 } : {}}>
-                      <div className="rock-row-main" onClick={() => toggleExpanded(rock.id)}>
-                        <span className="rock-expand"><Ic.Chevron dir={expanded ? "down" : "right"} /></span>
-                        <RockStatusBadge rock={rock} onChange={greyed ? undefined : setRockStatus} />
-                        <div className="rock-body">
-                          <div className="rock-title-line">
-                            <span className="rock-title-text" style={greyed ? { textDecoration: "line-through", color: "var(--t3)" } : {}}>{rock.title}</span>
-                            {rock.quarter && <span className="rock-q-chip">{rock.quarter}</span>}
-                          </div>
-                          {!greyed && ms.length > 0 && <div className="rock-ms-hint">
-                            <div className="rock-ms-bar"><div className="rock-ms-bar-fill" style={{ width: `${(msDone / ms.length) * 100}%` }} /></div>
-                            <span className="rock-ms-count-txt">{msDone}/{ms.length} milestones</span>
-                          </div>}
-                        </div>
-                        <div className="rock-row-right">
-                          {rock.dueDate && <span className={`rock-due${overdue ? " overdue" : ""}`}>{overdue && <Ic.Warn />}{fmtDate(rock.dueDate)}</span>}
-                          <button className="btn-ghost" style={{ padding: "4px 6px", flexShrink: 0 }} onClick={e => { e.stopPropagation(); openEdit(rock); }}><Ic.More /></button>
-                        </div>
-                      </div>
-                      {expanded && <div className="rock-ms-panel">
-                        {ms.map(m => <div key={m.id} className="rock-ms-item">
-                          <CircleCk on={m.done} toggle={greyed ? undefined : () => toggleMilestone(rock.id, m.id)} />
-                          <span className={`rock-ms-item-txt${m.done ? " done" : ""}`}>{m.title}</span>
-                          {!greyed && <button className="btn-ghost" style={{ fontSize: 17, lineHeight: 1, padding: "0 4px", color: "var(--t3)" }} onClick={() => removeMilestone(rock.id, m.id)}>×</button>}
-                        </div>)}
-                        {!greyed && <div className="rock-ms-input-row">
-                          <input className="rock-ms-input" placeholder="+ Add milestone..." value={milestoneInputs[rock.id] || ""} onChange={e => setMilestoneInputs(p => ({ ...p, [rock.id]: e.target.value }))} onKeyDown={e => { if (e.key === "Enter") addMilestone(rock.id, milestoneInputs[rock.id] || ""); }} />
-                          {(milestoneInputs[rock.id] || "").trim() && <button className="btn btn-sm btn-p" onClick={() => addMilestone(rock.id, milestoneInputs[rock.id] || "")}>Add</button>}
-                        </div>}
-                      </div>}
-                    </div>
-                  );
-                })}
-              </div>
-          }
-        </div>;
-      })}
     </div></div>
 
     {modal === "rock" && <Modal title={editId ? "Edit rock" : "Create rock"} onClose={() => setModal(null)}>
       <div className="modal-body">
-        {!editId && <div className="field">
-          <label>Type</label>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button className={`btn${form.type === "company" ? " btn-p" : ""}`} onClick={() => setForm(f => ({ ...f, type: "company", owner: "company" }))}>Company</button>
-            <button className={`btn${form.type === "individual" ? " btn-p" : ""}`} onClick={() => setForm(f => ({ ...f, type: "individual", owner: defaultOwner }))}>Individual</button>
-          </div>
-        </div>}
-
         <div className="field">
           <label>Rock title</label>
           <input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="Quarterly priority" autoFocus />
         </div>
 
-        {form.type === "company"
-          ? <div className="field">
-              <label>Assigned to</label>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 4 }}>
-                {ownerableTeam.map(m => (
-                  <label key={m.id} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", padding: "5px 10px", borderRadius: 6, border: `1px solid ${form.assignees.includes(m.id) ? "var(--blue)" : "var(--brd)"}`, background: form.assignees.includes(m.id) ? "var(--blue-l)" : "var(--white)", fontWeight: form.assignees.includes(m.id) ? 600 : 400, fontSize: 13 }}>
-                    <input type="checkbox" style={{ display: "none" }} checked={form.assignees.includes(m.id)} onChange={() => toggleAssignee(m.id)} />
-                    <Av m={m} size={20} />{m.name}
-                  </label>
-                ))}
-              </div>
-            </div>
-          : <div className="field">
-              <label>Owner</label>
-              <select value={form.owner} onChange={e => setForm({ ...form, owner: e.target.value })}>
-                {ownerableTeam.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-              </select>
-            </div>
-        }
-
         <div style={{ display: "flex", gap: 12 }}>
+          <div className="field" style={{ flex: 1 }}>
+            <label>Owner</label>
+            <select value={form.owner} onChange={e => setForm({ ...form, owner: e.target.value })}>
+              {team.filter(m => m.id !== "2").map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select>
+          </div>
           <div className="field" style={{ flex: 1 }}>
             <label>Quarter</label>
             <input value={form.quarter} onChange={e => setForm({ ...form, quarter: e.target.value })} placeholder="Q1 2026" />
           </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 12 }}>
           <div className="field" style={{ flex: 1 }}>
             <label>Due date</label>
             <input type="date" value={form.dueDate} onChange={e => setForm({ ...form, dueDate: e.target.value })} />
@@ -898,10 +736,37 @@ function RocksPage({ rocks, setRocks, team, activeMemberIds }) {
             </select>
           </div>
         </div>
+
+        <div className="field" style={{ marginBottom: 0 }}>
+          <label>Milestones{form.milestones.length > 0 ? ` (${form.milestones.filter(m => m.done).length}/${form.milestones.length})` : ""}</label>
+          {form.milestones.map(ms => (
+            <div className="ms-row" key={ms.id}>
+              <CircleCk on={ms.done} toggle={() => toggleMilestone(ms.id)} />
+              <span className={`ms-title${ms.done ? " done" : ""}`}>{ms.title}</span>
+              {ms.dueDate && <span className="ms-due">{fmtDate(ms.dueDate)}</span>}
+              <button className="btn-ghost" onClick={() => removeMilestone(ms.id)}><Ic.Trash /></button>
+            </div>
+          ))}
+          <div className="ms-add">
+            <input type="text" value={msTitle} onChange={e => setMsTitle(e.target.value)} placeholder="Add a milestone..." onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addMilestone(); } }} />
+            <input type="date" value={msDue} onChange={e => setMsDue(e.target.value)} />
+            <button className="btn btn-sm" onClick={addMilestone}>Add</button>
+          </div>
+        </div>
+
+        {editId && (linkedIssues.length > 0 || linkedTodos.length > 0) && (
+          <div className="field" style={{ marginBottom: 0, marginTop: 16 }}>
+            <label>Linked Items</label>
+            {linkedIssues.map(i => <div key={i.id} className="ms-row"><span className="tag">Issue</span><span className="ms-title">{i.title}</span></div>)}
+            {linkedTodos.map(t => <div key={t.id} className="ms-row"><span className="tag">To-Do</span><span className="ms-title">{t.title}</span></div>)}
+          </div>
+        )}
       </div>
 
       <div className="modal-foot" style={{ justifyContent: "space-between" }}>
-        <div>{editId && <button className="btn" style={{ color: "var(--red-t)", borderColor: "var(--red)" }} onClick={() => removeRock(editId)}><Ic.Trash /> Delete</button>}</div>
+        <div>
+          {editId && <button className="btn" style={{ color: "var(--red-t)", borderColor: "var(--red)" }} onClick={() => removeRock(editId)}><Ic.Trash /> Delete</button>}
+        </div>
         <div style={{ display: "flex", gap: 8 }}>
           <button className="btn" onClick={() => setModal(null)}>Cancel</button>
           <button className="btn btn-p" onClick={saveRock}>{editId ? "Save" : "Create"}</button>
@@ -911,32 +776,18 @@ function RocksPage({ rocks, setRocks, team, activeMemberIds }) {
   </>;
 }
 
-function IssuesPage({ issues, setIssues, team, activeMemberIds }) {
-  const ownerableTeam = team.filter(m => m.name !== "Unassigned");
-  const defaultOwner = ownerableTeam[0]?.id || "";
+function IssuesPage({ issues, setIssues, team, activeMemberIds, rocks, todos, setTodos }) {
   const [tab, setTab] = useState("short-term");
   const [search, setSearch] = useState("");
   const [ownerFilter, setOwnerFilter] = useState("all");
-  const [showSolved, setShowSolved] = useState(false);
   const [modal, setModal] = useState(null);
   const [editId, setEditId] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
-  const [form, setForm] = useState({ title: "", owner: defaultOwner, type: "short-term", priority: "medium", notes: "" });
-
-  // Keyboard shortcut: N = new issue
-  useEffect(() => {
-    const handler = e => {
-      if (e.key === "n" && !["INPUT","TEXTAREA","SELECT"].includes(e.target.tagName) && !modal) {
-        e.preventDefault(); openAdd();
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [modal]); // eslint-disable-line
+  const [form, setForm] = useState({ title: "", owner: "1", type: "short-term", notes: "", rockId: "" });
 
   const openAdd = () => {
     setEditId(null);
-    setForm({ title: "", owner: defaultOwner, type: tab, priority: "medium", notes: "" });
+    setForm({ title: "", owner: "1", type: tab, notes: "", rockId: "" });
     setModal("issue");
   };
 
@@ -944,10 +795,10 @@ function IssuesPage({ issues, setIssues, team, activeMemberIds }) {
     setEditId(issue.id);
     setForm({
       title: issue.title || "",
-      owner: issue.owner || defaultOwner,
+      owner: issue.owner || "1",
       type: issue.type || "short-term",
-      priority: issue.priority || "medium",
-      notes: issue.notes || ""
+      notes: issue.notes || "",
+      rockId: issue.rockId || ""
     });
     setModal("issue");
   };
@@ -959,8 +810,8 @@ function IssuesPage({ issues, setIssues, team, activeMemberIds }) {
       title,
       owner: form.owner,
       type: form.type,
-      priority: form.priority,
       notes: form.notes,
+      rockId: form.rockId || null,
       done: false
     };
 
@@ -970,6 +821,21 @@ function IssuesPage({ issues, setIssues, team, activeMemberIds }) {
       setIssues(prev => [...prev, { id: uid(), ...payload, createdAt: new Date().toISOString() }]);
     }
     setModal(null);
+  };
+
+  const createTodoFromIssue = issue => {
+    const d = new Date();
+    d.setDate(d.getDate() + 7);
+    setTodos(prev => [...prev, {
+      id: uid(),
+      title: issue.title,
+      owner: issue.owner,
+      dueDate: d.toISOString().split("T")[0],
+      done: false,
+      rockId: issue.rockId || null,
+      sourceIssueId: issue.id,
+      createdAt: new Date().toISOString()
+    }]);
   };
 
   const setSolved = (id, done) => {
@@ -986,19 +852,11 @@ function IssuesPage({ issues, setIssues, team, activeMemberIds }) {
     .filter(i => {
       if (!activeMemberIds.includes(i.owner)) return false;
       if ((i.type || "short-term") !== tab) return false;
-      if (showSolved ? !i.done : i.done) return false;
       if (ownerFilter !== "all" && i.owner !== ownerFilter) return false;
       if (search && !i.title.toLowerCase().includes(search.toLowerCase()) && !(i.notes || "").toLowerCase().includes(search.toLowerCase())) return false;
       return true;
     })
-    .sort((a, b) => {
-      const pOrder = { high: 0, medium: 1, low: 2 };
-      const pa = pOrder[a.priority || "medium"] ?? 1;
-      const pb = pOrder[b.priority || "medium"] ?? 1;
-      if (pa !== pb) return pa - pb;
-      return (a.createdAt || "").localeCompare(b.createdAt || "");
-    });
-  const solvedCount = issues.filter(i => i.done && activeMemberIds.includes(i.owner) && (i.type || "short-term") === tab).length;
+    .sort((a, b) => Number(Boolean(a.done)) - Number(Boolean(b.done)) || (a.createdAt || "").localeCompare(b.createdAt || ""));
 
   const selected = issues.find(i => i.id === selectedId) || null;
 
@@ -1022,12 +880,8 @@ function IssuesPage({ issues, setIssues, team, activeMemberIds }) {
     <div className="toolbar">
       <select className="tb-filter" value={ownerFilter} onChange={e => setOwnerFilter(e.target.value)}>
         <option value="all">Owner: All</option>
-        {ownerableTeam.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+        {team.filter(m => m.id !== "2").map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
       </select>
-      <div className="tb-toggle" onClick={() => { setShowSolved(v => !v); setSelectedId(null); }}>
-        <div className={`tb-toggle-track${showSolved ? " on" : ""}`}><div className="tb-toggle-dot" /></div>
-        Solved{solvedCount > 0 && <span style={{ marginLeft: 4, fontSize: 11, color: "var(--t3)" }}>({solvedCount})</span>}
-      </div>
       <div className="tb-search">
         <Ic.Search />
         <input placeholder="Search issues..." value={search} onChange={e => setSearch(e.target.value)} />
@@ -1037,11 +891,10 @@ function IssuesPage({ issues, setIssues, team, activeMemberIds }) {
     <div className="content"><div className="content-inner" style={{ display: "grid", gridTemplateColumns: "1fr minmax(260px, 340px)", gap: 16 }}>
       <div className="sec" style={{ marginBottom: 0 }}>
         <div className="sec-hdr">
-          <h2>{showSolved ? "Solved Issues" : "Issue List"}<span className="count">{filtered.length}</span></h2>
-          <span style={{ fontSize: 11, color: "var(--t3)", fontWeight: 400 }}>Press <kbd style={{ background: "var(--bg2)", border: "1px solid var(--brd2)", borderRadius: 4, padding: "1px 5px", fontSize: 10, fontFamily: "monospace" }}>N</kbd> to add</span>
+          <h2>Issue List<span className="count">{filtered.length}</span></h2>
         </div>
 
-        {filtered.length === 0 ? <div className="empty"><EmptySVG.issues /><h3>{showSolved ? "No solved issues" : "No issues yet"}</h3><p>{showSolved ? "Solved issues will appear here." : "Add an issue to track your next problem to solve."}</p></div> : (
+        {filtered.length === 0 ? <div className="empty"><EmptySVG.issues /><h3>No issues yet</h3><p>Add an issue to track your next problem to solve.</p></div> : (
           <table className="tbl">
             <thead>
               <tr>
@@ -1055,19 +908,15 @@ function IssuesPage({ issues, setIssues, team, activeMemberIds }) {
               {filtered.map(issue => {
                 const m = team.find(x => x.id === issue.owner) || team[1];
                 const active = selectedId === issue.id;
-                const pri = issue.priority || "medium";
-                const priStyle = pri === "high" ? { color: "var(--red-t)", background: "var(--red-l)", border: "1px solid var(--red)" } : pri === "low" ? { color: "var(--t2)", background: "var(--bg2)", border: "1px solid var(--brd2)" } : { color: "var(--yellow-t)", background: "var(--yellow-l)", border: "1px solid var(--yellow)" };
                 return <tr key={issue.id} style={active ? { background: "var(--blue-l)" } : {}}>
                   <td><CircleCk on={Boolean(issue.done)} toggle={() => setSolved(issue.id, !issue.done)} /></td>
                   <td onClick={() => setSelectedId(issue.id)} style={{ cursor: "pointer" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <span style={{ fontWeight: 600, color: issue.done ? "var(--t3)" : "var(--t1)", textDecoration: issue.done ? "line-through" : "none" }}>{issue.title}</span>
-                      <span style={{ fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 10, whiteSpace: "nowrap", flexShrink: 0, ...priStyle }}>{pri.charAt(0).toUpperCase() + pri.slice(1)}</span>
-                    </div>
+                    <div style={{ fontWeight: 600, color: issue.done ? "var(--t3)" : "var(--t1)", textDecoration: issue.done ? "line-through" : "none" }}>{issue.title}</div>
                     {!!issue.notes && <div style={{ fontSize: 12, color: "var(--t3)", marginTop: 2 }}>{issue.notes.slice(0, 110)}{issue.notes.length > 110 ? "..." : ""}</div>}
+                    {issue.rockId && rocks.find(r => r.id === issue.rockId) && <span className="tag" style={{ marginTop: 4, display: "inline-block" }}>{rocks.find(r => r.id === issue.rockId).title}</span>}
                   </td>
                   <td><Av m={m} /></td>
-                  <td><button className="btn-ghost" style={{ padding: "4px 6px" }} onClick={() => openEdit(issue)}><Ic.More /></button></td>
+                  <td><button className="btn-ghost" onClick={() => openEdit(issue)}>Edit</button></td>
                 </tr>;
               })}
             </tbody>
@@ -1081,10 +930,10 @@ function IssuesPage({ issues, setIssues, team, activeMemberIds }) {
           <div style={{ fontSize: 11, color: "var(--t3)", textTransform: "uppercase", fontWeight: 700, letterSpacing: ".05em" }}>Title</div>
           <div style={{ marginTop: 6, fontSize: 15, fontWeight: 600 }}>{selected.title}</div>
 
-          <div style={{ display: "flex", gap: 10, marginTop: 14, alignItems: "center" }}>
+          <div style={{ display: "flex", gap: 10, marginTop: 14, alignItems: "center", flexWrap: "wrap" }}>
             <span className={`status ${selected.done ? "status-on" : "status-off"}`}>{selected.done ? "Solved" : "Open"}</span>
             <span style={{ fontSize: 12, color: "var(--t2)" }}>{(selected.type || "short-term") === "short-term" ? "Short-Term" : "Long-Term"}</span>
-            {(() => { const pri = selected.priority || "medium"; const priStyle = pri === "high" ? { color: "var(--red-t)", background: "var(--red-l)", border: "1px solid var(--red)" } : pri === "low" ? { color: "var(--t2)", background: "var(--bg2)", border: "1px solid var(--brd2)" } : { color: "var(--yellow-t)", background: "var(--yellow-l)", border: "1px solid var(--yellow)" }; return <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 10, ...priStyle }}>{pri.charAt(0).toUpperCase() + pri.slice(1)} priority</span>; })()}
+            {selected.rockId && rocks.find(r => r.id === selected.rockId) && <span className="tag">{rocks.find(r => r.id === selected.rockId).title}</span>}
           </div>
 
           <div style={{ marginTop: 16 }}>
@@ -1097,9 +946,12 @@ function IssuesPage({ issues, setIssues, team, activeMemberIds }) {
             />
           </div>
 
-          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+          <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
             <button className="btn" onClick={() => setSolved(selected.id, !selected.done)}>{selected.done ? "Reopen" : "Mark solved"}</button>
             <button className="btn" onClick={() => openEdit(selected)}>Edit metadata</button>
+            {todos.some(t => t.sourceIssueId === selected.id)
+              ? <span style={{ fontSize: 12, color: "var(--t3)", alignSelf: "center" }}>✓ To-do created</span>
+              : <button className="btn" onClick={() => createTodoFromIssue(selected)}><Ic.Plus /> Create to-do</button>}
           </div>
         </div>}
       </div>
@@ -1116,15 +968,7 @@ function IssuesPage({ issues, setIssues, team, activeMemberIds }) {
           <div className="field" style={{ flex: 1 }}>
             <label>Owner</label>
             <select value={form.owner} onChange={e => setForm({ ...form, owner: e.target.value })}>
-              {ownerableTeam.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-            </select>
-          </div>
-          <div className="field" style={{ flex: 1 }}>
-            <label>Priority</label>
-            <select value={form.priority} onChange={e => setForm({ ...form, priority: e.target.value })}>
-              <option value="high">High</option>
-              <option value="medium">Medium</option>
-              <option value="low">Low</option>
+              {team.filter(m => m.id !== "2").map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
             </select>
           </div>
           <div className="field" style={{ flex: 1 }}>
@@ -1134,6 +978,14 @@ function IssuesPage({ issues, setIssues, team, activeMemberIds }) {
               <option value="long-term">Long-Term</option>
             </select>
           </div>
+        </div>
+
+        <div className="field">
+          <label>Linked rock (optional)</label>
+          <select value={form.rockId} onChange={e => setForm({ ...form, rockId: e.target.value })}>
+            <option value="">None</option>
+            {rocks.map(r => <option key={r.id} value={r.id}>{r.title}</option>)}
+          </select>
         </div>
 
         <div className="field" style={{ marginBottom: 0 }}>
@@ -1155,22 +1007,265 @@ function IssuesPage({ issues, setIssues, team, activeMemberIds }) {
   </>;
 }
 
-function MeetingsPage({ meetings, setMeetings, issues, setIssues, todos, setTodos, rocks, setRocks, team, activeMemberIds }) {
-  const store = meetings && typeof meetings === "object" ? meetings : {};
-  const defaultMeetingRef = useRef({
+const PROCESS_STATUS = {
+  "not-started": { label: "Not Started", cls: "status-muted" },
+  "draft": { label: "Draft", cls: "status-warn" },
+  "documented": { label: "Documented", cls: "status-on" },
+  "fba": { label: "FBA", cls: "status-fba" }
+};
+
+function ProcessesPage({ processes, setProcesses, team, activeMemberIds }) {
+  const [search, setSearch] = useState("");
+  const [ownerFilter, setOwnerFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [modal, setModal] = useState(null);
+  const [editId, setEditId] = useState(null);
+  const [selectedId, setSelectedId] = useState(null);
+  const [form, setForm] = useState({ title: "", owner: "1", status: "not-started", steps: "", notes: "" });
+
+  const openAdd = () => {
+    setEditId(null);
+    setForm({ title: "", owner: "1", status: "not-started", steps: "", notes: "" });
+    setModal("process");
+  };
+
+  const openEdit = proc => {
+    setEditId(proc.id);
+    setForm({
+      title: proc.title || "",
+      owner: proc.owner || "1",
+      status: proc.status || "not-started",
+      steps: (proc.steps || []).join("\n"),
+      notes: proc.notes || ""
+    });
+    setModal("process");
+  };
+
+  const saveProcess = () => {
+    const title = form.title.trim();
+    if (!title) return;
+    const payload = {
+      title,
+      owner: form.owner,
+      status: form.status,
+      steps: parseLines(form.steps),
+      notes: form.notes
+    };
+    if (editId) {
+      setProcesses(prev => prev.map(p => (p.id === editId ? { ...p, ...payload } : p)));
+    } else {
+      setProcesses(prev => [...prev, { id: uid(), ...payload, lastReviewed: null, createdAt: new Date().toISOString() }]);
+    }
+    setModal(null);
+  };
+
+  const removeProcess = id => {
+    setProcesses(prev => prev.filter(p => p.id !== id));
+    if (selectedId === id) setSelectedId(null);
+    setModal(null);
+  };
+
+  const markReviewed = id => {
+    setProcesses(prev => prev.map(p => (p.id === id ? { ...p, lastReviewed: new Date().toISOString().split("T")[0] } : p)));
+  };
+
+  const filtered = processes
+    .filter(p => {
+      if (!activeMemberIds.includes(p.owner)) return false;
+      if (ownerFilter !== "all" && p.owner !== ownerFilter) return false;
+      if (statusFilter !== "all" && (p.status || "not-started") !== statusFilter) return false;
+      if (search && !p.title.toLowerCase().includes(search.toLowerCase())) return false;
+      return true;
+    })
+    .sort((a, b) => (a.title || "").localeCompare(b.title || ""));
+
+  const selected = processes.find(p => p.id === selectedId) || null;
+
+  return <>
+    <div className="phdr">
+      <div className="phdr-top">
+        <div>
+          <h1>Processes</h1>
+          <div className="phdr-desc">Document, standardize, and keep your core processes followed by all.</div>
+        </div>
+        <div className="phdr-actions">
+          <button className="btn btn-p" onClick={openAdd}><Ic.Plus /> Add process</button>
+        </div>
+      </div>
+    </div>
+
+    <div className="toolbar">
+      <select className="tb-filter" value={ownerFilter} onChange={e => setOwnerFilter(e.target.value)}>
+        <option value="all">Owner: All</option>
+        {team.filter(m => m.id !== "2").map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+      </select>
+      <select className="tb-filter" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+        <option value="all">Status: All</option>
+        <option value="not-started">Not Started</option>
+        <option value="draft">Draft</option>
+        <option value="documented">Documented</option>
+        <option value="fba">FBA</option>
+      </select>
+      <div className="tb-search">
+        <Ic.Search />
+        <input placeholder="Search processes..." value={search} onChange={e => setSearch(e.target.value)} />
+      </div>
+    </div>
+
+    <div className="content"><div className="content-inner" style={{ display: "grid", gridTemplateColumns: "1fr minmax(280px, 380px)", gap: 16 }}>
+      <div className="sec" style={{ marginBottom: 0 }}>
+        <div className="sec-hdr">
+          <h2>Process List<span className="count">{filtered.length}</span></h2>
+        </div>
+
+        {filtered.length === 0 ? <div className="empty"><h3>No processes documented</h3><p>Add your first core process to start building your playbook.</p></div> : (
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>Title</th>
+                <th style={{ width: 120 }}>Status</th>
+                <th style={{ width: 100 }}>Reviewed</th>
+                <th style={{ width: 85 }}>Owner</th>
+                <th style={{ width: 70 }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(proc => {
+                const m = team.find(x => x.id === proc.owner) || team[1];
+                const active = selectedId === proc.id;
+                const st = PROCESS_STATUS[proc.status || "not-started"];
+                return <tr key={proc.id} style={active ? { background: "var(--blue-l)" } : {}}>
+                  <td onClick={() => setSelectedId(proc.id)} style={{ cursor: "pointer", fontWeight: 600 }}>{proc.title}</td>
+                  <td><span className={`status ${st.cls}`}>{st.label}</span></td>
+                  <td style={{ color: "var(--t2)" }}>{proc.lastReviewed ? fmtDate(proc.lastReviewed) : "-"}</td>
+                  <td><Av m={m} /></td>
+                  <td><button className="btn-ghost" onClick={() => openEdit(proc)}>Edit</button></td>
+                </tr>;
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="sec" style={{ marginBottom: 0 }}>
+        <div className="sec-hdr"><h2>Details</h2></div>
+        {!selected ? <div className="empty" style={{ padding: "30px 16px" }}><p>Select a process to view its steps.</p></div> : <div style={{ padding: "16px 20px" }}>
+          <div style={{ fontSize: 11, color: "var(--t3)", textTransform: "uppercase", fontWeight: 700, letterSpacing: ".05em" }}>Title</div>
+          <div style={{ marginTop: 6, fontSize: 15, fontWeight: 600 }}>{selected.title}</div>
+
+          <div style={{ display: "flex", gap: 10, marginTop: 14, alignItems: "center", flexWrap: "wrap" }}>
+            <span className={`status ${PROCESS_STATUS[selected.status || "not-started"].cls}`}>{PROCESS_STATUS[selected.status || "not-started"].label}</span>
+            <span style={{ fontSize: 12, color: "var(--t2)" }}>Last reviewed: {selected.lastReviewed ? fmtDate(selected.lastReviewed) : "Never"}</span>
+          </div>
+
+          <div style={{ marginTop: 16 }}>
+            <div style={{ fontSize: 11, color: "var(--t3)", textTransform: "uppercase", fontWeight: 700, letterSpacing: ".05em" }}>Steps (one per line)</div>
+            <textarea
+              value={(selected.steps || []).join("\n")}
+              onChange={e => setProcesses(prev => prev.map(p => (p.id === selected.id ? { ...p, steps: parseLines(e.target.value) } : p)))}
+              placeholder={"1. First step\n2. Second step..."}
+              style={{ marginTop: 8, width: "100%", minHeight: 140, border: "1px solid var(--brd)", borderRadius: 8, padding: 10, fontFamily: "inherit", fontSize: 13, resize: "vertical" }}
+            />
+          </div>
+
+          <div style={{ marginTop: 16 }}>
+            <div style={{ fontSize: 11, color: "var(--t3)", textTransform: "uppercase", fontWeight: 700, letterSpacing: ".05em" }}>Notes</div>
+            <textarea
+              value={selected.notes || ""}
+              onChange={e => setProcesses(prev => prev.map(p => (p.id === selected.id ? { ...p, notes: e.target.value } : p)))}
+              placeholder="Tools, exceptions, links to docs..."
+              style={{ marginTop: 8, width: "100%", minHeight: 90, border: "1px solid var(--brd)", borderRadius: 8, padding: 10, fontFamily: "inherit", fontSize: 13, resize: "vertical" }}
+            />
+          </div>
+
+          <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+            <button className="btn" onClick={() => markReviewed(selected.id)}>Mark reviewed today</button>
+            <button className="btn" onClick={() => openEdit(selected)}>Edit metadata</button>
+          </div>
+        </div>}
+      </div>
+    </div></div>
+
+    {modal === "process" && <Modal title={editId ? "Edit process" : "Create process"} onClose={() => setModal(null)}>
+      <div className="modal-body">
+        <div className="field">
+          <label>Process title</label>
+          <input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="e.g., New patient onboarding" autoFocus />
+        </div>
+
+        <div style={{ display: "flex", gap: 12 }}>
+          <div className="field" style={{ flex: 1 }}>
+            <label>Owner</label>
+            <select value={form.owner} onChange={e => setForm({ ...form, owner: e.target.value })}>
+              {team.filter(m => m.id !== "2").map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select>
+          </div>
+          <div className="field" style={{ flex: 1 }}>
+            <label>Status</label>
+            <select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}>
+              <option value="not-started">Not Started</option>
+              <option value="draft">Draft</option>
+              <option value="documented">Documented</option>
+              <option value="fba">FBA</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="field">
+          <label>Steps (one per line)</label>
+          <textarea value={form.steps} onChange={e => setForm({ ...form, steps: e.target.value })} placeholder={"Step one\nStep two\nStep three"} rows={5} />
+        </div>
+
+        <div className="field" style={{ marginBottom: 0 }}>
+          <label>Notes</label>
+          <textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} placeholder="Tools, exceptions, links to docs..." rows={3} />
+        </div>
+      </div>
+
+      <div className="modal-foot" style={{ justifyContent: "space-between" }}>
+        <div>
+          {editId && <button className="btn" style={{ color: "var(--red-t)", borderColor: "var(--red)" }} onClick={() => removeProcess(editId)}><Ic.Trash /> Delete</button>}
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn" onClick={() => setModal(null)}>Cancel</button>
+          <button className="btn btn-p" onClick={saveProcess}>{editId ? "Save" : "Create"}</button>
+        </div>
+      </div>
+    </Modal>}
+  </>;
+}
+
+const MEETING_SECTION_LABELS = [
+  ["segue", "1. Segue"],
+  ["scorecard", "2. Scorecard"],
+  ["rocks", "3. Rocks"],
+  ["customerEmployee", "4. Customer/Employee Headlines"],
+  ["todoReview", "5. To-Do Review"],
+  ["ids", "6. IDS (Identify, Discuss, Solve)"]
+];
+
+function freshMeetingState() {
+  return {
     title: "Weekly Level 10",
     date: new Date().toISOString().slice(0, 10),
     sections: { segue: "", scorecard: "", rocks: "", customerEmployee: "", todoReview: "", ids: "" },
     tangents: [],
     timerSeconds: 0
-  });
+  };
+}
+
+function MeetingsPage({ meetings, setMeetings, issues, todos, team, activeMemberIds }) {
+  const store = meetings && typeof meetings === "object" ? meetings : {};
+  const defaultMeetingRef = useRef(freshMeetingState());
   const mState = store.current || defaultMeetingRef.current;
   const history = store.history || [];
 
   const [running, setRunning] = useState(false);
   const [tangentText, setTangentText] = useState("");
-  const [meetTab, setMeetTab] = useState("current");
-  const [viewingHistory, setViewingHistory] = useState(null);
+  const [tab, setTab] = useState("run");
+  const [modal, setModal] = useState(null);
+  const [rating, setRating] = useState(null);
+  const [selectedHistoryId, setSelectedHistoryId] = useState(null);
 
   useEffect(() => {
     if (!running) return undefined;
@@ -1182,7 +1277,7 @@ function MeetingsPage({ meetings, setMeetings, issues, setIssues, todos, setTodo
       });
     }, 1000);
     return () => clearInterval(id);
-  }, [running, setMeetings, mState]); // eslint-disable-line
+  }, [running, setMeetings, mState]);
 
   const updateMeeting = updater => {
     setMeetings(prev => {
@@ -1204,57 +1299,60 @@ function MeetingsPage({ meetings, setMeetings, issues, setIssues, todos, setTodo
     setTangentText("");
   };
 
-  const endAndArchive = () => {
+  const clearMeeting = () => {
+    setRunning(false);
+    setMeetings(prev => {
+      const base = prev && typeof prev === "object" ? prev : {};
+      return { ...base, current: freshMeetingState() };
+    });
+  };
+
+  const openEndMeeting = () => {
+    setRating(null);
+    setModal("end");
+  };
+
+  const confirmEndMeeting = () => {
+    if (!rating) return;
     setRunning(false);
     setMeetings(prev => {
       const base = prev && typeof prev === "object" ? prev : {};
       const cur = base.current || mState;
-      const hasContent = (cur.timerSeconds > 0) ||
-        Object.values(cur.sections || {}).some(s => (s || "").trim().length > 0) ||
-        (cur.tangents || []).length > 0;
-      const newEntry = hasContent ? { ...cur, id: uid(), archivedAt: new Date().toISOString() } : null;
-      return {
-        ...base,
-        history: newEntry ? [newEntry, ...(base.history || [])] : (base.history || []),
-        current: {
-          title: "Weekly Level 10",
-          date: new Date().toISOString().slice(0, 10),
-          sections: { segue: "", scorecard: "", rocks: "", customerEmployee: "", todoReview: "", ids: "" },
-          tangents: [],
-          timerSeconds: 0
-        }
+      const archived = {
+        id: uid(),
+        title: cur.title || "Weekly Level 10",
+        date: cur.date || new Date().toISOString().slice(0, 10),
+        sections: cur.sections || {},
+        tangents: cur.tangents || [],
+        durationSeconds: cur.timerSeconds || 0,
+        rating,
+        endedAt: new Date().toISOString()
       };
+      return { ...base, history: [archived, ...(base.history || [])], current: freshMeetingState() };
     });
+    setModal(null);
   };
 
-  const deleteHistoryEntry = id => {
-    setMeetings(prev => ({ ...(prev || {}), history: (prev?.history || []).filter(x => x.id !== id) }));
-    setViewingHistory(null);
+  const removeHistoryMeeting = id => {
+    setMeetings(prev => {
+      const base = prev && typeof prev === "object" ? prev : {};
+      return { ...base, history: (base.history || []).filter(h => h.id !== id) };
+    });
+    if (selectedHistoryId === id) setSelectedHistoryId(null);
   };
 
-  const seconds = mState.timerSeconds || 0;
-  const hh = String(Math.floor(seconds / 3600)).padStart(2, "0");
-  const mm = String(Math.floor((seconds % 3600) / 60)).padStart(2, "0");
-  const ss = String(seconds % 60).padStart(2, "0");
-
-  const fmtDuration = secs => {
-    if (!secs) return "—";
-    const h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60);
-    return h > 0 ? `${h}h ${m}m` : `${m}m`;
+  const fmtDuration = s => {
+    const sec = s || 0;
+    const hh = String(Math.floor(sec / 3600)).padStart(2, "0");
+    const mm = String(Math.floor((sec % 3600) / 60)).padStart(2, "0");
+    const ss = String(sec % 60).padStart(2, "0");
+    return `${hh}:${mm}:${ss}`;
   };
 
   const openIssues = issues.filter(i => !i.done && activeMemberIds.includes(i.owner));
   const openTodos = todos.filter(t => !t.done && activeMemberIds.includes(t.owner));
   const tangents = mState.tangents || [];
-
-  const HISTORY_SECTION_LABELS = [
-    ["segue", "1. Segue"],
-    ["scorecard", "2. Scorecard"],
-    ["rocks", "3. Rocks Review"],
-    ["customerEmployee", "4. Headlines"],
-    ["todoReview", "5. To-Do Review"],
-    ["ids", "6. IDS Notes"]
-  ];
+  const selectedHistory = history.find(h => h.id === selectedHistoryId) || null;
 
   return <>
     <div className="phdr">
@@ -1263,21 +1361,20 @@ function MeetingsPage({ meetings, setMeetings, issues, setIssues, todos, setTodo
           <h1>Meetings</h1>
           <div className="phdr-desc">Run your Level 10 meeting with structured sections, timer, IDS notes, and tangents.</div>
         </div>
-        {meetTab === "current" && <div className="phdr-actions" style={{ gap: 10 }}>
-          <div style={{ fontSize: 20, fontWeight: 700, letterSpacing: ".03em", minWidth: 110, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{hh}:{mm}:{ss}</div>
-          <button className={`btn${running ? "" : " btn-p"}`} onClick={() => setRunning(r => !r)}>{running ? "Pause" : "Start"}</button>
-          <button className="btn" onClick={endAndArchive} title="End meeting and save to history"><Ic.Archive /> End &amp; Save</button>
+        {tab === "run" && <div className="phdr-actions" style={{ gap: 10 }}>
+          <div style={{ fontSize: 20, fontWeight: 700, letterSpacing: ".03em", minWidth: 110, textAlign: "right" }}>{fmtDuration(mState.timerSeconds || 0)}</div>
+          <button className="btn" onClick={() => setRunning(r => !r)}>{running ? "Pause" : "Start"}</button>
+          <button className="btn" onClick={clearMeeting}>Reset</button>
+          <button className="btn btn-p" onClick={openEndMeeting}>End meeting</button>
         </div>}
       </div>
       <div className="tabs">
-        <div className={`tab${meetTab === "current" ? " on" : ""}`} onClick={() => setMeetTab("current")}>Current Meeting</div>
-        <div className={`tab${meetTab === "history" ? " on" : ""}`} onClick={() => setMeetTab("history")}>
-          History{history.length > 0 && <span className="tab-count">{history.length}</span>}
-        </div>
+        <div className={`tab${tab === "run" ? " on" : ""}`} onClick={() => setTab("run")}>Run Meeting</div>
+        <div className={`tab${tab === "history" ? " on" : ""}`} onClick={() => setTab("history")}>History</div>
       </div>
     </div>
 
-    {meetTab === "current" && <div className="content"><div className="content-inner" style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 16 }}>
+    {tab === "run" && <div className="content"><div className="content-inner" style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 16 }}>
       <div>
         <div className="sec">
           <div className="sec-hdr"><h2>Meeting Setup</h2></div>
@@ -1304,24 +1401,8 @@ function MeetingsPage({ meetings, setMeetings, issues, setIssues, todos, setTodo
         </div>
 
         <div className="sec">
-          <div className="sec-hdr"><h2>3. Rocks Review</h2></div>
-          {(() => {
-            const activeRocks = rocks.filter(r => r.status !== "completed" && r.status !== "cancelled" && (r.owner === "company" || activeMemberIds.includes(r.owner)));
-            const setRockStatus = (id, status) => setRocks(prev => prev.map(r => r.id === id ? { ...r, status } : r));
-            return activeRocks.length > 0 ? <div style={{ borderBottom: "1px solid var(--brd)" }}>
-              {activeRocks.map(r => {
-                const owner = r.owner === "company" ? null : team.find(m => m.id === r.owner);
-                const assignees = r.owner === "company" ? (r.assignees || []).map(aid => team.find(m => m.id === aid)).filter(Boolean) : [];
-                return <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 20px", borderBottom: "1px solid var(--brd2)" }}>
-                  <RockStatusBadge rock={r} onChange={setRockStatus} />
-                  <span style={{ flex: 1, fontSize: 13.5, fontWeight: 500 }}>{r.title}</span>
-                  {owner && <Av m={owner} size={22} />}
-                  {assignees.slice(0, 3).map(a => <Av key={a.id} m={a} size={22} />)}
-                </div>;
-              })}
-            </div> : null;
-          })()}
-          <div style={{ padding: "12px 20px" }}><textarea className="field" style={{ marginBottom: 0, minHeight: 60, width: "100%" }} value={mState.sections?.rocks || ""} onChange={e => setSection("rocks", e.target.value)} placeholder="Blockers and discussion notes..." /></div>
+          <div className="sec-hdr"><h2>3. Rocks</h2></div>
+          <div style={{ padding: "12px 20px" }}><textarea className="field" style={{ marginBottom: 0, minHeight: 78, width: "100%" }} value={mState.sections?.rocks || ""} onChange={e => setSection("rocks", e.target.value)} placeholder="Rock status review and blockers" /></div>
         </div>
 
         <div className="sec">
@@ -1331,20 +1412,7 @@ function MeetingsPage({ meetings, setMeetings, issues, setIssues, todos, setTodo
 
         <div className="sec">
           <div className="sec-hdr"><h2>5. To-Do Review</h2></div>
-          {(() => {
-            const reviewTodos = todos.filter(t => activeMemberIds.includes(t.owner)).sort((a, b) => Number(Boolean(a.done)) - Number(Boolean(b.done)));
-            return reviewTodos.length > 0 ? <div style={{ borderBottom: "1px solid var(--brd)" }}>
-              {reviewTodos.map(t => {
-                const m = team.find(x => x.id === t.owner) || team[1];
-                return <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 20px", borderBottom: "1px solid var(--brd2)" }}>
-                  <CircleCk on={t.done} toggle={() => setTodos(p => p.map(x => x.id === t.id ? { ...x, done: !x.done } : x))} />
-                  <span style={{ flex: 1, fontSize: 13.5, textDecoration: t.done ? "line-through" : "none", color: t.done ? "var(--t3)" : "var(--t1)" }}>{t.title}</span>
-                  <Av m={m} size={22} />
-                </div>;
-              })}
-            </div> : null;
-          })()}
-          <div style={{ padding: "12px 20px" }}><textarea className="field" style={{ marginBottom: 0, minHeight: 60, width: "100%" }} value={mState.sections?.todoReview || ""} onChange={e => setSection("todoReview", e.target.value)} placeholder="Notes on completions and carry-overs..." /></div>
+          <div style={{ padding: "12px 20px" }}><textarea className="field" style={{ marginBottom: 0, minHeight: 78, width: "100%" }} value={mState.sections?.todoReview || ""} onChange={e => setSection("todoReview", e.target.value)} placeholder="Review last week's commitments and misses" /></div>
         </div>
 
         <div className="sec">
@@ -1359,13 +1427,7 @@ function MeetingsPage({ meetings, setMeetings, issues, setIssues, todos, setTodo
           {openIssues.length === 0 ? <div className="empty" style={{ padding: "20px 12px" }}><p>No open issues for active team.</p></div> : <div style={{ padding: "8px 14px 12px" }}>
             {openIssues.slice(0, 8).map(i => {
               const m = team.find(x => x.id === i.owner) || team[1];
-              const pri = i.priority || "medium";
-              const dot = pri === "high" ? "var(--red)" : pri === "low" ? "var(--t4)" : "var(--yellow)";
-              return <div key={i.id} className="dash-irow">
-                <span style={{ width: 6, height: 6, borderRadius: "50%", background: dot, flexShrink: 0 }} />
-                <span style={{ flex: 1, fontSize: 13 }}>{i.title}</span>
-                <Av m={m} size={20} />
-              </div>;
+              return <div key={i.id} className="dash-irow"><span style={{ flex: 1, fontSize: 13 }}>{i.title}</span><Av m={m} size={20} /></div>;
             })}
           </div>}
         </div>
@@ -1375,12 +1437,7 @@ function MeetingsPage({ meetings, setMeetings, issues, setIssues, todos, setTodo
           {openTodos.length === 0 ? <div className="empty" style={{ padding: "20px 12px" }}><p>No open to-dos for active team.</p></div> : <div style={{ padding: "8px 14px 12px" }}>
             {openTodos.slice(0, 8).map(t => {
               const m = team.find(x => x.id === t.owner) || team[1];
-              const od = isOverdue(t.dueDate);
-              return <div key={t.id} className="dash-irow">
-                {od && <Ic.Warn />}
-                <span style={{ flex: 1, fontSize: 13, color: od ? "var(--red-t)" : "var(--t1)" }}>{t.title}</span>
-                <Av m={m} size={20} />
-              </div>;
+              return <div key={t.id} className="dash-irow"><span style={{ flex: 1, fontSize: 13 }}>{t.title}</span><Av m={m} size={20} /></div>;
             })}
           </div>}
         </div>
@@ -1389,14 +1446,21 @@ function MeetingsPage({ meetings, setMeetings, issues, setIssues, todos, setTodo
           <div className="sec-hdr"><h2>Tangents<span className="count">{tangents.length}</span></h2></div>
           <div style={{ padding: "12px 14px" }}>
             <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-              <input value={tangentText} onChange={e => setTangentText(e.target.value)} onKeyDown={e => { if (e.key === "Enter") addTangent(); }} placeholder="Capture tangent..." style={{ flex: 1, border: "1px solid var(--brd)", borderRadius: 8, padding: "8px 10px", fontFamily: "inherit", fontSize: 13 }} />
+              <input
+                value={tangentText}
+                onChange={e => setTangentText(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") addTangent(); }}
+                placeholder="Capture tangent..."
+                style={{ flex: 1, border: "1px solid var(--brd)", borderRadius: 8, padding: "8px 10px", fontFamily: "inherit", fontSize: 13 }}
+              />
               <button className="btn btn-sm" onClick={addTangent}>Add</button>
             </div>
+
             {tangents.length === 0 ? <div style={{ fontSize: 12, color: "var(--t3)" }}>No tangents captured.</div> : <div style={{ maxHeight: 220, overflowY: "auto" }}>
               {tangents.map(tg => (
                 <div key={tg.id} className="dash-irow">
                   <span style={{ flex: 1, fontSize: 13 }}>{tg.title}</span>
-                  <button className="btn-ghost" style={{ fontSize: 12, color: "var(--t2)" }} onClick={() => updateMeeting(cur => ({ ...cur, tangents: (cur.tangents || []).filter(x => x.id !== tg.id) }))}>Remove</button>
+                  <button className="btn-ghost" onClick={() => updateMeeting(cur => ({ ...cur, tangents: (cur.tangents || []).filter(x => x.id !== tg.id) }))}>Remove</button>
                 </div>
               ))}
             </div>}
@@ -1405,58 +1469,80 @@ function MeetingsPage({ meetings, setMeetings, issues, setIssues, todos, setTodo
       </div>
     </div></div>}
 
-    {meetTab === "history" && <div className="content"><div className="content-inner">
-      <div className="sec">
+    {tab === "history" && <div className="content"><div className="content-inner" style={{ display: "grid", gridTemplateColumns: "1fr minmax(280px, 380px)", gap: 16 }}>
+      <div className="sec" style={{ marginBottom: 0 }}>
         <div className="sec-hdr"><h2>Past Meetings<span className="count">{history.length}</span></h2></div>
-        {history.length === 0
-          ? <div className="empty">
-              <svg width="72" height="72" viewBox="0 0 72 72" fill="none"><circle cx="36" cy="36" r="32" fill="#EFF6FF" stroke="#BFDBFE" strokeWidth="2"/><rect x="20" y="18" width="32" height="36" rx="4" fill="#DBEAFE" stroke="#93C5FD" strokeWidth="1.5"/><path d="M28 28h16M28 34h12M28 40h8" stroke="#2563EB" strokeWidth="1.5" strokeLinecap="round"/><circle cx="36" cy="54" r="8" fill="#2563EB"/><path d="M33 54l2 2 4-3" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-              <h3>No meeting history yet</h3>
-              <p>Run a meeting and click "End &amp; Save" to archive it here.</p>
-            </div>
-          : <div>
+        {history.length === 0 ? <div className="empty"><h3>No meeting history yet</h3><p>End a meeting to save it here with a rating.</p></div> : (
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Title</th>
+                <th style={{ width: 90 }}>Duration</th>
+                <th style={{ width: 90 }}>Rating</th>
+                <th style={{ width: 70 }}></th>
+              </tr>
+            </thead>
+            <tbody>
               {history.map(h => {
-                const sectionsFilled = Object.values(h.sections || {}).filter(s => (s || "").trim()).length;
-                const dateStr = h.date ? new Date(h.date + "T00:00:00").toLocaleDateString("default", { weekday: "short", month: "short", day: "numeric", year: "numeric" }) : "Unknown date";
-                return <div key={h.id} className="meet-history-row" onClick={() => setViewingHistory(h)}>
-                  <div className="meet-history-icon"><Ic.History /></div>
-                  <div className="meet-history-body">
-                    <div className="meet-history-title">{h.title}</div>
-                    <div className="meet-history-meta">{dateStr}</div>
-                  </div>
-                  <div className="meet-history-chips">
-                    {h.timerSeconds > 0 && <span className="meet-chip">{fmtDuration(h.timerSeconds)}</span>}
-                    <span className="meet-chip">{sectionsFilled}/6 sections</span>
-                    {(h.tangents || []).length > 0 && <span className="meet-chip">{h.tangents.length} tangent{h.tangents.length !== 1 ? "s" : ""}</span>}
-                  </div>
-                  <Ic.Chevron dir="right" />
-                </div>;
+                const active = selectedHistoryId === h.id;
+                const ratingCls = h.rating >= 8 ? "status-on" : h.rating >= 5 ? "status-warn" : "status-off";
+                return <tr key={h.id} style={active ? { background: "var(--blue-l)" } : {}}>
+                  <td onClick={() => setSelectedHistoryId(h.id)} style={{ cursor: "pointer" }}>{fmtDate(h.date)}</td>
+                  <td onClick={() => setSelectedHistoryId(h.id)} style={{ cursor: "pointer", fontWeight: 600 }}>{h.title}</td>
+                  <td style={{ color: "var(--t2)" }}>{fmtDuration(h.durationSeconds)}</td>
+                  <td><span className={`status ${ratingCls}`}>{h.rating}/10</span></td>
+                  <td><button className="btn-ghost" onClick={() => removeHistoryMeeting(h.id)}>Delete</button></td>
+                </tr>;
               })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="sec" style={{ marginBottom: 0 }}>
+        <div className="sec-hdr"><h2>Details</h2></div>
+        {!selectedHistory ? <div className="empty" style={{ padding: "30px 16px" }}><p>Select a meeting to view its notes.</p></div> : <div style={{ padding: "16px 20px" }}>
+          <div style={{ fontSize: 11, color: "var(--t3)", textTransform: "uppercase", fontWeight: 700, letterSpacing: ".05em" }}>Meeting</div>
+          <div style={{ marginTop: 6, fontSize: 15, fontWeight: 600 }}>{selectedHistory.title}</div>
+
+          <div style={{ display: "flex", gap: 10, marginTop: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <span style={{ fontSize: 12, color: "var(--t2)" }}>{fmtDate(selectedHistory.date)}</span>
+            <span style={{ fontSize: 12, color: "var(--t2)" }}>Duration: {fmtDuration(selectedHistory.durationSeconds)}</span>
+            <span className={`status ${selectedHistory.rating >= 8 ? "status-on" : selectedHistory.rating >= 5 ? "status-warn" : "status-off"}`}>{selectedHistory.rating}/10</span>
+          </div>
+
+          {MEETING_SECTION_LABELS.map(([key, label]) => selectedHistory.sections?.[key] ? (
+            <div key={key} style={{ marginTop: 14 }}>
+              <div style={{ fontSize: 11, color: "var(--t3)", textTransform: "uppercase", fontWeight: 700, letterSpacing: ".05em" }}>{label}</div>
+              <div style={{ marginTop: 6, fontSize: 13, color: "var(--t1)", whiteSpace: "pre-wrap" }}>{selectedHistory.sections[key]}</div>
             </div>
-        }
+          ) : null)}
+
+          {(selectedHistory.tangents || []).length > 0 && <div style={{ marginTop: 14 }}>
+            <div style={{ fontSize: 11, color: "var(--t3)", textTransform: "uppercase", fontWeight: 700, letterSpacing: ".05em" }}>Tangents</div>
+            <ul style={{ marginTop: 6, paddingLeft: 18, fontSize: 13 }}>
+              {selectedHistory.tangents.map(tg => <li key={tg.id}>{tg.title}</li>)}
+            </ul>
+          </div>}
+        </div>}
       </div>
     </div></div>}
 
-    {viewingHistory && <Modal title={viewingHistory.title} onClose={() => setViewingHistory(null)}>
-      <div className="modal-body" style={{ maxHeight: "65vh", overflowY: "auto" }}>
-        <div style={{ fontSize: 12, color: "var(--t2)", marginBottom: 20, display: "flex", gap: 12, flexWrap: "wrap" }}>
-          <span>{viewingHistory.date ? new Date(viewingHistory.date + "T00:00:00").toLocaleDateString("default", { weekday: "long", month: "long", day: "numeric", year: "numeric" }) : ""}</span>
-          {viewingHistory.timerSeconds > 0 && <span className="meet-chip">{fmtDuration(viewingHistory.timerSeconds)}</span>}
-        </div>
-        {HISTORY_SECTION_LABELS.filter(([k]) => (viewingHistory.sections?.[k] || "").trim()).map(([k, label]) => (
-          <div key={k} style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 11, color: "var(--t3)", textTransform: "uppercase", fontWeight: 700, letterSpacing: ".05em", marginBottom: 5 }}>{label}</div>
-            <div style={{ fontSize: 13, color: "var(--t1)", whiteSpace: "pre-wrap", lineHeight: 1.6, background: "var(--bg)", borderRadius: 6, padding: "8px 12px" }}>{viewingHistory.sections[k]}</div>
+    {modal === "end" && <Modal title="End meeting" onClose={() => setModal(null)}>
+      <div className="modal-body">
+        <div className="field" style={{ marginBottom: 0 }}>
+          <label>Rate this meeting (1-10)</label>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+            {Array.from({ length: 10 }, (_, i) => i + 1).map(n => (
+              <button key={n} type="button" className={`btn btn-sm${rating === n ? " btn-p" : ""}`} onClick={() => setRating(n)}>{n}</button>
+            ))}
           </div>
-        ))}
-        {(viewingHistory.tangents || []).length > 0 && <div>
-          <div style={{ fontSize: 11, color: "var(--t3)", textTransform: "uppercase", fontWeight: 700, letterSpacing: ".05em", marginBottom: 5 }}>Tangents</div>
-          {viewingHistory.tangents.map(tg => <div key={tg.id} style={{ fontSize: 13, padding: "3px 0", color: "var(--t1)" }}>• {tg.title}</div>)}
-        </div>}
+        </div>
       </div>
-      <div className="modal-foot" style={{ justifyContent: "space-between" }}>
-        <button className="btn" style={{ color: "var(--red-t)", borderColor: "var(--red)" }} onClick={() => deleteHistoryEntry(viewingHistory.id)}><Ic.Trash /> Delete</button>
-        <button className="btn" onClick={() => setViewingHistory(null)}>Close</button>
+      <div className="modal-foot">
+        <button className="btn" onClick={() => setModal(null)}>Cancel</button>
+        <button className="btn btn-p" onClick={confirmEndMeeting} disabled={!rating}>Save & end meeting</button>
       </div>
     </Modal>}
   </>;
@@ -1466,19 +1552,17 @@ function HeadlinesPage({ headlines, setHeadlines, team, activeMemberIds }) {
   const [archived, setArchived] = useState(false);
   const [modal, setModal] = useState(null);
   const [editId, setEditId] = useState(null);
-  const ownerableTeam = team.filter(m => m.name !== "Unassigned");
-  const defaultOwner = ownerableTeam[0]?.id || "";
-  const [form, setForm] = useState({ title: "", body: "", owner: defaultOwner, archived: false });
+  const [form, setForm] = useState({ title: "", body: "", owner: "1" });
 
   const openAdd = () => {
     setEditId(null);
-    setForm({ title: "", body: "", owner: defaultOwner, archived: false });
+    setForm({ title: "", body: "", owner: "1" });
     setModal("headline");
   };
 
   const openEdit = item => {
     setEditId(item.id);
-    setForm({ title: item.title || "", body: item.body || "", owner: item.owner || defaultOwner, archived: Boolean(item.archived) });
+    setForm({ title: item.title || "", body: item.body || "", owner: item.owner || "1" });
     setModal("headline");
   };
 
@@ -1528,19 +1612,19 @@ function HeadlinesPage({ headlines, setHeadlines, team, activeMemberIds }) {
         {filtered.length === 0 ? <div className="empty"><EmptySVG.headlines /><h3>No headlines</h3><p>Create a headline to broadcast important updates.</p></div> : <div style={{ padding: "8px 16px 12px" }}>
           {filtered.map(h => {
             const m = team.find(x => x.id === h.owner) || team[1];
-            return <div key={h.id} style={{ border: "1px solid var(--brd)", borderRadius: 10, padding: "12px 14px", marginBottom: 10, background: "var(--white)", transition: "box-shadow .15s" }}>
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+            return <div key={h.id} style={{ border: "1px solid var(--brd)", borderRadius: 10, padding: 12, marginBottom: 10, background: "var(--white)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 15, fontWeight: 700 }}>{h.title}</div>
-                  <div style={{ fontSize: 11, color: "var(--t3)", marginTop: 2, display: "flex", gap: 8, alignItems: "center" }}>
-                    {new Date(h.createdAt || Date.now()).toLocaleDateString("default", { month: "short", day: "numeric", year: "numeric" })}
-                    {h.archived && <span style={{ background: "var(--bg2)", border: "1px solid var(--brd2)", borderRadius: 10, padding: "0 6px", fontSize: 10, fontWeight: 600, color: "var(--t3)" }}>Archived</span>}
-                  </div>
+                  <div style={{ fontSize: 11, color: "var(--t3)", marginTop: 2 }}>{new Date(h.createdAt || Date.now()).toLocaleDateString()}</div>
                 </div>
-                <Av m={m} size={26} />
-                <button className="btn-ghost" style={{ padding: "4px 6px" }} onClick={() => openEdit(h)}><Ic.More /></button>
+                <Av m={m} size={24} />
               </div>
-              {!!h.body && <div style={{ marginTop: 10, fontSize: 13, color: "var(--t2)", whiteSpace: "pre-wrap", lineHeight: 1.6 }}>{h.body}</div>}
+              {!!h.body && <div style={{ marginTop: 8, fontSize: 13, color: "var(--t2)", whiteSpace: "pre-wrap" }}>{h.body}</div>}
+              <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
+                <button className="btn-ghost" onClick={() => openEdit(h)}>Edit</button>
+                <button className="btn-ghost" onClick={() => setHeadlines(prev => prev.map(x => (x.id === h.id ? { ...x, archived: !x.archived } : x)))}>{h.archived ? "Unarchive" : "Archive"}</button>
+              </div>
             </div>;
           })}
         </div>}
@@ -1550,36 +1634,16 @@ function HeadlinesPage({ headlines, setHeadlines, team, activeMemberIds }) {
     {modal === "headline" && <Modal title={editId ? "Edit headline" : "Create headline"} onClose={() => setModal(null)}>
       <div className="modal-body">
         <div className="field"><label>Title</label><input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} autoFocus /></div>
-        <div className="field"><label>Author</label><select value={form.owner} onChange={e => setForm({ ...form, owner: e.target.value })}>{ownerableTeam.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select></div>
+        <div className="field"><label>Author</label><select value={form.owner} onChange={e => setForm({ ...form, owner: e.target.value })}>{team.filter(m => m.id !== "2").map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select></div>
         <div className="field" style={{ marginBottom: 0 }}><label>Body</label><textarea rows={6} value={form.body} onChange={e => setForm({ ...form, body: e.target.value })} /></div>
       </div>
       <div className="modal-foot" style={{ justifyContent: "space-between" }}>
-        <div style={{ display: "flex", gap: 8 }}>
-          {editId && <button className="btn" style={{ color: "var(--red-t)", borderColor: "var(--red)" }} onClick={() => removeHeadline(editId)}><Ic.Trash /> Delete</button>}
-          {editId && <button className="btn" onClick={() => { setHeadlines(prev => prev.map(x => x.id === editId ? { ...x, archived: !form.archived } : x)); setModal(null); }}><Ic.Archive /> {form.archived ? "Unarchive" : "Archive"}</button>}
-        </div>
+        <div>{editId && <button className="btn" style={{ color: "var(--red-t)", borderColor: "var(--red)" }} onClick={() => removeHeadline(editId)}><Ic.Trash /> Delete</button>}</div>
         <div style={{ display: "flex", gap: 8 }}><button className="btn" onClick={() => setModal(null)}>Cancel</button><button className="btn btn-p" onClick={saveHeadline}>{editId ? "Save" : "Create"}</button></div>
       </div>
     </Modal>}
   </>;
 }
-
-const VTO_DESCRIPTIONS = {
-  coreValues:      "Who you are — the 3–7 principles that define your culture and guide every decision.",
-  purposePassion:  "Why you exist beyond profit — your core focus and reason for being.",
-  niche:           "What you do, who you do it for, and your geographic reach.",
-  tenYearTarget:   "A bold, specific goal 10 years out that inspires and directs the whole organization.",
-  marketTarget:    "Your ideal customer profile, key message, and proven process summary.",
-  threeUniques:    "The 3 things that make you truly different from every competitor in your space.",
-  provenProcess:   "The named, repeatable steps you follow every time to deliver your core product or service.",
-  guarantee:       "Your bold customer promise that eliminates perceived risk and builds trust.",
-  threeYearRevenue:"Revenue target three years from today.",
-  threeYearProfit: "Gross profit or EBITDA target three years from today.",
-  threeYearLooks:  "What does the business look, feel, and act like in 3 years? List specific, measurable snapshots.",
-  oneYearRevenue:  "Revenue goal for the next 12 months.",
-  oneYearProfit:   "Profit goal for the next 12 months.",
-  oneYearGoals:    "The 3–7 most important things you must accomplish this year to hit your 3-year picture."
-};
 
 function VisionPage({ vision, setVision }) {
   const purposeFields = [
@@ -1603,50 +1667,183 @@ function VisionPage({ vision, setVision }) {
 
   const setField = (k, v) => setVision(prev => ({ ...prev, [k]: v }));
 
-  const renderField = ([key, label]) => (
-    <div className="vto-field" key={key}>
-      <label style={{ fontSize: 11, color: "var(--t3)", textTransform: "uppercase", fontWeight: 700, letterSpacing: ".05em" }}>{label}</label>
-      <div className="vto-field-desc">{VTO_DESCRIPTIONS[key]}</div>
-      <textarea value={vision[key] || ""} onChange={e => setField(key, e.target.value)} placeholder={`Enter your ${label.toLowerCase()}...`} />
-    </div>
-  );
-
   return <>
     <div className="phdr"><div className="phdr-top"><div><h1>Vision / V/TO</h1><div className="phdr-desc">Capture where the business is going and how it gets there.</div></div></div></div>
     <div className="content"><div className="content-inner">
       <div className="vto-grid">
         <div className="vto-box">
           <div className="sec-hdr"><h2>Vision</h2></div>
-          {purposeFields.map(renderField)}
+          {purposeFields.map(([key, label]) => <div className="vto-field" key={key}><label style={{ fontSize: 11, color: "var(--t3)", textTransform: "uppercase", fontWeight: 700, letterSpacing: ".05em" }}>{label}</label><textarea value={vision[key] || ""} onChange={e => setField(key, e.target.value)} placeholder={`Add ${label.toLowerCase()}...`} /></div>)}
         </div>
         <div className="vto-box">
           <div className="sec-hdr"><h2>Traction</h2></div>
-          {tractionFields.map(renderField)}
+          {tractionFields.map(([key, label]) => <div className="vto-field" key={key}><label style={{ fontSize: 11, color: "var(--t3)", textTransform: "uppercase", fontWeight: 700, letterSpacing: ".05em" }}>{label}</label><textarea value={vision[key] || ""} onChange={e => setField(key, e.target.value)} placeholder={`Add ${label.toLowerCase()}...`} /></div>)}
         </div>
       </div>
     </div></div>
   </>;
 }
 
-function OrgChartPage({ teams, team }) {
-  return <>
-    <div className="phdr"><div className="phdr-top"><div><h1>Org Chart</h1><div className="phdr-desc">Visualize roles and accountability by team.</div></div></div></div>
-    <div className="content"><div className="content-inner">
-      <div className="sec">
-        <div className="sec-hdr"><h2>Reporting Structure</h2></div>
-        <div className="org-wrap">
-          {teams.map(t => {
-            const members = team.filter(m => t.memberIds.includes(m.id));
-            return <div key={t.id} style={{ width: "100%", marginBottom: 26 }}>
-              <div style={{ textAlign: "center", marginBottom: 12, fontSize: 14, fontWeight: 700 }}>{t.name}</div>
-              <div className="org-level">
-                {members.length === 0 ? <div style={{ color: "var(--t3)", fontSize: 13 }}>No team members assigned</div> : members.map(m => <div key={m.id} className="org-card"><div style={{ fontWeight: 700, fontSize: 14 }}>{m.name}</div><div style={{ color: "var(--t2)", marginTop: 4, fontSize: 12 }}>{m.role || "No role"}</div></div>)}
-              </div>
-            </div>;
-          })}
+function AccountabilityChartPage({ seats, setSeats, team, vision, peopleAnalyzer, setPeopleAnalyzer }) {
+  const [tab, setTab] = useState("chart");
+  const [modal, setModal] = useState(null);
+  const [editId, setEditId] = useState(null);
+  const [form, setForm] = useState({ title: "", responsibilities: "", memberId: "", parentId: null });
+  const [quarter, setQuarter] = useState(currentQuarterLabel());
+  const [selectedMemberId, setSelectedMemberId] = useState(null);
+
+  const members = team.filter(m => m.id !== "2");
+
+  const openAddSeat = (parentId = null) => {
+    setEditId(null);
+    setForm({ title: "", responsibilities: "", memberId: "", parentId });
+    setModal("seat");
+  };
+
+  const openEditSeat = seat => {
+    setEditId(seat.id);
+    setForm({
+      title: seat.title || "",
+      responsibilities: (seat.responsibilities || []).join("\n"),
+      memberId: seat.memberId || "",
+      parentId: seat.parentId || null
+    });
+    setModal("seat");
+  };
+
+  const saveSeat = () => {
+    const title = form.title.trim();
+    if (!title) return;
+    const payload = { title, responsibilities: parseLines(form.responsibilities), memberId: form.memberId || null, parentId: form.parentId || null };
+    if (editId) {
+      setSeats(prev => prev.map(s => (s.id === editId ? { ...s, ...payload } : s)));
+    } else {
+      setSeats(prev => [...prev, { id: uid(), ...payload }]);
+    }
+    setModal(null);
+  };
+
+  const removeSeat = id => {
+    setSeats(prev => {
+      const seat = prev.find(s => s.id === id);
+      const reparented = prev.map(s => (s.parentId === id ? { ...s, parentId: seat?.parentId || null } : s));
+      return reparented.filter(s => s.id !== id);
+    });
+    setModal(null);
+  };
+
+  const childrenOf = parentId => seats.filter(s => s.parentId === parentId);
+  const topSeats = childrenOf(null);
+
+  const SeatNode = ({ seat }) => {
+    const m = team.find(x => x.id === seat.memberId);
+    const kids = childrenOf(seat.id);
+    return <div className="acc-branch">
+      <div className="seat-card">
+        <div className="seat-title">{seat.title}</div>
+        <div className="seat-person">{m ? <><Av m={m} size={18} />{m.name}</> : <span style={{ color: "var(--t3)" }}>Unassigned</span>}</div>
+        {!!(seat.responsibilities || []).length && <ul className="seat-resp">{seat.responsibilities.map((r, i) => <li key={i}>{r}</li>)}</ul>}
+        <div className="seat-actions">
+          <button className="btn-ghost" style={{ fontSize: 11 }} onClick={() => openEditSeat(seat)}>Edit</button>
+          <button className="btn-ghost" style={{ fontSize: 11 }} onClick={() => openAddSeat(seat.id)}>+ Report</button>
         </div>
       </div>
-    </div></div>
+      {kids.length > 0 && <div className="acc-children">{kids.map(k => <SeatNode key={k.id} seat={k} />)}</div>}
+    </div>;
+  };
+
+  const coreValues = parseLines(vision.coreValues);
+  const quarterData = peopleAnalyzer[quarter] || {};
+  const getEntry = memberId => quarterData[memberId] || { gwc: {}, values: {}, notes: "" };
+
+  const updateEntry = (memberId, updater) => {
+    setPeopleAnalyzer(prev => {
+      const qData = prev[quarter] || {};
+      const cur = qData[memberId] || { gwc: {}, values: {}, notes: "" };
+      return { ...prev, [quarter]: { ...qData, [memberId]: updater(cur) } };
+    });
+  };
+
+  const toggleGwc = (memberId, key) => updateEntry(memberId, cur => ({ ...cur, gwc: { ...cur.gwc, [key]: !cur.gwc[key] } }));
+
+  const cycleRating = (memberId, value) => updateEntry(memberId, cur => {
+    const order = ["", "+", "+/-", "-"];
+    const idx = order.indexOf(cur.values[value] || "");
+    return { ...cur, values: { ...cur.values, [value]: order[(idx + 1) % order.length] } };
+  });
+
+  const setNotes = (memberId, text) => updateEntry(memberId, cur => ({ ...cur, notes: text }));
+
+  return <>
+    <div className="phdr">
+      <div className="phdr-top">
+        <div>
+          <h1>Accountability Chart</h1>
+          <div className="phdr-desc">Define seats, roles, and reporting lines — and run quarterly People Analyzer conversations.</div>
+        </div>
+        {tab === "chart" && <div className="phdr-actions"><button className="btn btn-p" onClick={() => openAddSeat(null)}><Ic.Plus /> Add seat</button></div>}
+      </div>
+      <div className="tabs">
+        <div className={`tab${tab === "chart" ? " on" : ""}`} onClick={() => setTab("chart")}>Chart</div>
+        <div className={`tab${tab === "analyzer" ? " on" : ""}`} onClick={() => setTab("analyzer")}>People Analyzer</div>
+      </div>
+    </div>
+
+    {tab === "chart" ? <div className="content"><div className="content-inner">
+      <div className="sec" style={{ overflow: "visible" }}>
+        <div className="sec-hdr"><h2>Seats<span className="count">{seats.length}</span></h2></div>
+        {topSeats.length === 0 ? <div className="empty"><h3>No seats defined</h3><p>Add your first seat to start building the chart.</p></div> : <div className="acc-wrap"><div className="acc-row">{topSeats.map(s => <SeatNode key={s.id} seat={s} />)}</div></div>}
+      </div>
+    </div></div> : <div className="content"><div className="content-inner" style={{ display: "grid", gridTemplateColumns: "1fr minmax(260px, 320px)", gap: 16 }}>
+      <div className="sec" style={{ marginBottom: 0 }}>
+        <div className="sec-hdr">
+          <h2>People Analyzer</h2>
+          <input value={quarter} onChange={e => setQuarter(e.target.value)} style={{ width: 110, padding: "5px 10px", border: "1px solid var(--brd)", borderRadius: 8, fontSize: 12, fontFamily: "inherit" }} />
+        </div>
+        {coreValues.length === 0 ? <div className="empty"><p>Add core values on the Vision page (one per line) to enable People Analyzer ratings.</p></div> : <div className="pa-grid">
+          <table className="pa-tbl">
+            <thead><tr><th style={{ textAlign: "left" }}>Name</th><th>GWC</th>{coreValues.map(v => <th key={v}>{v}</th>)}</tr></thead>
+            <tbody>
+              {members.map(m => {
+                const entry = getEntry(m.id);
+                const active = selectedMemberId === m.id;
+                return <tr key={m.id} className={active ? "on" : ""}>
+                  <td className="pa-name" onClick={() => setSelectedMemberId(m.id)}>{m.name}</td>
+                  <td><div className="pa-gwc">
+                    {["get", "want", "capacity"].map(k => <div key={k} className={`pa-gwc-dot${entry.gwc[k] ? " on" : ""}`} title={k} onClick={() => toggleGwc(m.id, k)}>{k[0].toUpperCase()}</div>)}
+                  </div></td>
+                  {coreValues.map(v => <td key={v}><button className="pa-rating" onClick={() => cycleRating(m.id, v)}>{entry.values[v] || "–"}</button></td>)}
+                </tr>;
+              })}
+            </tbody>
+          </table>
+        </div>}
+      </div>
+
+      <div className="sec" style={{ marginBottom: 0 }}>
+        <div className="sec-hdr"><h2>Notes</h2></div>
+        {!selectedMemberId ? <div className="empty" style={{ padding: "30px 16px" }}><p>Select a person to add quarterly conversation notes.</p></div> : <div style={{ padding: 16 }}>
+          <textarea
+            value={getEntry(selectedMemberId).notes || ""}
+            onChange={e => setNotes(selectedMemberId, e.target.value)}
+            placeholder="Document the quarterly conversation..."
+            style={{ width: "100%", minHeight: 220, border: "1px solid var(--brd)", borderRadius: 8, padding: 10, fontFamily: "inherit", fontSize: 13, resize: "vertical" }}
+          />
+        </div>}
+      </div>
+    </div></div>}
+
+    {modal === "seat" && <Modal title={editId ? "Edit seat" : "Add seat"} onClose={() => setModal(null)}>
+      <div className="modal-body">
+        <div className="field"><label>Seat title</label><input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="e.g., Sales Leader" autoFocus /></div>
+        <div className="field"><label>Assigned person</label><select value={form.memberId} onChange={e => setForm({ ...form, memberId: e.target.value })}><option value="">Unassigned</option>{members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select></div>
+        <div className="field" style={{ marginBottom: 0 }}><label>Responsibilities (one per line)</label><textarea rows={5} value={form.responsibilities} onChange={e => setForm({ ...form, responsibilities: e.target.value })} placeholder={"Owns X\nDrives Y\nManages Z"} /></div>
+      </div>
+      <div className="modal-foot" style={{ justifyContent: "space-between" }}>
+        <div>{editId && <button className="btn" style={{ color: "var(--red-t)", borderColor: "var(--red)" }} onClick={() => removeSeat(editId)}><Ic.Trash /> Delete</button>}</div>
+        <div style={{ display: "flex", gap: 8 }}><button className="btn" onClick={() => setModal(null)}>Cancel</button><button className="btn btn-p" onClick={saveSeat}>{editId ? "Save" : "Create"}</button></div>
+      </div>
+    </Modal>}
   </>;
 }
 
@@ -1706,7 +1903,7 @@ function TeamPage({ team, setTeam, teams, setTeams }) {
         <table className="tbl">
           <thead><tr><th>Name</th><th>Role</th><th style={{ width: 90 }}>Color</th><th style={{ width: 80 }}></th></tr></thead>
           <tbody>
-            {team.filter(m => m.id !== "2").map(m => <tr key={m.id}><td>{m.name}</td><td style={{ color: "var(--t2)" }}>{m.role || "-"}</td><td><div style={{ width: 16, height: 16, borderRadius: 16, background: m.color, border: "1px solid var(--brd)" }} /></td><td><button className="btn-ghost" style={{ padding: "4px 6px" }} onClick={() => openEditMember(m)}><Ic.More /></button></td></tr>)}
+            {team.filter(m => m.id !== "2").map(m => <tr key={m.id}><td>{m.name}</td><td style={{ color: "var(--t2)" }}>{m.role || "-"}</td><td><div style={{ width: 16, height: 16, borderRadius: 16, background: m.color, border: "1px solid var(--brd)" }} /></td><td><button className="btn-ghost" onClick={() => openEditMember(m)}>Edit</button></td></tr>)}
           </tbody>
         </table>
       </div>
@@ -1756,7 +1953,7 @@ function TeamPage({ team, setTeam, teams, setTeams }) {
   </>;
 }
 
-function ProfilePage({ profile, setProfile }) {
+function ProfilePage({ profile, setProfile, onExportBackup, onImportBackup }) {
   const initials = `${(profile.firstName || "").slice(0, 1)}${(profile.lastName || "").slice(0, 1)}`.toUpperCase() || "U";
 
   const setField = (k, v) => setProfile(prev => ({ ...prev, [k]: v }));
@@ -1780,25 +1977,41 @@ function ProfilePage({ profile, setProfile }) {
           <div style={{ padding: "14px 16px", fontSize: 12, color: "var(--t2)" }}>Use a square image for best results.</div>
         </div>
 
-        <div className="profile-card">
-          <div className="profile-section-title">Identity</div>
-          <div style={{ padding: "16px 20px" }}>
-            <div style={{ display: "flex", gap: 12 }}>
-              <div className="field" style={{ flex: 1 }}><label>First name</label><input value={profile.firstName || ""} onChange={e => setField("firstName", e.target.value)} /></div>
-              <div className="field" style={{ flex: 1 }}><label>Last name</label><input value={profile.lastName || ""} onChange={e => setField("lastName", e.target.value)} /></div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+          <div className="profile-card">
+            <div className="profile-section-title">Identity</div>
+            <div style={{ padding: "16px 20px" }}>
+              <div style={{ display: "flex", gap: 12 }}>
+                <div className="field" style={{ flex: 1 }}><label>First name</label><input value={profile.firstName || ""} onChange={e => setField("firstName", e.target.value)} /></div>
+                <div className="field" style={{ flex: 1 }}><label>Last name</label><input value={profile.lastName || ""} onChange={e => setField("lastName", e.target.value)} /></div>
+              </div>
+              <div className="field"><label>Title</label><input value={profile.title || ""} onChange={e => setField("title", e.target.value)} /></div>
+              <div className="field" style={{ marginBottom: 0 }}><label>Bio</label><textarea rows={6} value={profile.bio || ""} onChange={e => setField("bio", e.target.value)} placeholder="Share your background and responsibilities" /></div>
             </div>
-            <div className="field"><label>Title</label><input value={profile.title || ""} onChange={e => setField("title", e.target.value)} /></div>
-            <div className="field" style={{ marginBottom: 0 }}><label>Bio</label><textarea rows={6} value={profile.bio || ""} onChange={e => setField("bio", e.target.value)} placeholder="Share your background and responsibilities" /></div>
+            <div className="profile-section-title">Address</div>
+            <div style={{ padding: "16px 20px" }}>
+              <div className="field"><label>Street</label><input value={profile.street || ""} onChange={e => setField("street", e.target.value)} /></div>
+              <div style={{ display: "flex", gap: 12 }}>
+                <div className="field" style={{ flex: 2 }}><label>City</label><input value={profile.city || ""} onChange={e => setField("city", e.target.value)} /></div>
+                <div className="field" style={{ flex: 1 }}><label>State</label><input value={profile.state || ""} onChange={e => setField("state", e.target.value)} /></div>
+                <div className="field" style={{ flex: 1 }}><label>Zip</label><input value={profile.zip || ""} onChange={e => setField("zip", e.target.value)} /></div>
+              </div>
+              <div className="field" style={{ marginBottom: 0 }}><label>Country</label><input value={profile.country || ""} onChange={e => setField("country", e.target.value)} /></div>
+            </div>
           </div>
-          <div className="profile-section-title">Address</div>
-          <div style={{ padding: "16px 20px" }}>
-            <div className="field"><label>Street</label><input value={profile.street || ""} onChange={e => setField("street", e.target.value)} /></div>
-            <div style={{ display: "flex", gap: 12 }}>
-              <div className="field" style={{ flex: 2 }}><label>City</label><input value={profile.city || ""} onChange={e => setField("city", e.target.value)} /></div>
-              <div className="field" style={{ flex: 1 }}><label>State</label><input value={profile.state || ""} onChange={e => setField("state", e.target.value)} /></div>
-              <div className="field" style={{ flex: 1 }}><label>Zip</label><input value={profile.zip || ""} onChange={e => setField("zip", e.target.value)} /></div>
+
+          <div className="profile-card">
+            <div className="profile-section-title">Data Backup</div>
+            <div style={{ padding: "16px 20px" }}>
+              <div style={{ fontSize: 13, color: "var(--t2)", marginBottom: 12 }}>Export a full backup of your data, or restore from a previous backup file. Restoring replaces all data currently stored in this browser.</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="btn" onClick={onExportBackup}>Export backup (JSON)</button>
+                <label className="btn" style={{ cursor: "pointer" }}>
+                  Import backup
+                  <input type="file" accept="application/json" style={{ display: "none" }} onChange={e => { const f = e.target.files?.[0]; if (f) onImportBackup(f); e.target.value = ""; }} />
+                </label>
+              </div>
             </div>
-            <div className="field" style={{ marginBottom: 0 }}><label>Country</label><input value={profile.country || ""} onChange={e => setField("country", e.target.value)} /></div>
           </div>
         </div>
       </div>
@@ -1806,17 +2019,11 @@ function ProfilePage({ profile, setProfile }) {
   </>;
 }
 
-// MOBILE BOTTOM NAV
-function MobileNav({ page, setPage, navMain, activeTodos, openIssues }) {
+// MOBILE BOTTOM NAV (with "More" overflow for pages beyond the first 5)
+function MobileNav({ page, setPage, navMain, navExtra, activeTodos, openIssues }) {
   const [moreOpen, setMoreOpen] = useState(false);
-  const morePages = [
-    { id: "headlines", label: "Headlines", icon: <Ic.Headlines /> },
-    { id: "vision",    label: "Vision",    icon: <Ic.Vision /> },
-    { id: "org",       label: "Org Chart", icon: <Ic.OrgChart /> },
-    { id: "team",      label: "Team",      icon: <Ic.Team /> },
-    { id: "profile",   label: "Profile",   icon: <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="10" cy="7" r="3.5"/><path d="M3 17c0-3.5 3-6 7-6s7 2.5 7 6" strokeLinecap="round"/></svg> },
-  ];
-  const mainFive = navMain.slice(0, 5); // dashboard, scorecard, rocks, todos, issues
+  const mainFive = navMain.slice(0, 5);
+  const morePages = [...navMain.slice(5), ...navExtra];
   const moreActive = morePages.some(p => p.id === page);
   return <>
     {moreOpen && <>
@@ -1834,8 +2041,8 @@ function MobileNav({ page, setPage, navMain, activeTodos, openIssues }) {
       {mainFive.map(n => (
         <div key={n.id} className={`bnav-i${page === n.id ? " on" : ""}`} onClick={() => setPage(n.id)}>
           {n.icon}<span>{n.label}</span>
-          {n.id === "todos"  && activeTodos > 0 && <span className="bbdg">{activeTodos}</span>}
-          {n.id === "issues" && openIssues > 0  && <span className="bbdg">{openIssues}</span>}
+          {n.id === "todos" && activeTodos > 0 && <span className="bbdg">{activeTodos}</span>}
+          {n.id === "issues" && openIssues > 0 && <span className="bbdg">{openIssues}</span>}
         </div>
       ))}
       <div className={`bnav-i${moreActive ? " on" : ""}`} onClick={() => setMoreOpen(v => !v)}>
@@ -1846,9 +2053,8 @@ function MobileNav({ page, setPage, navMain, activeTodos, openIssues }) {
 }
 
 // MAIN APP
-export default function App() {
+export default function App({ orgName }) {
   const [page, setPage] = useState("dashboard");
-  const [prevPage, setPrevPage] = useState("dashboard");
   const [todos, setTodos] = useState([]);
   const [scorecard, setScorecard] = useState([]);
   const [scData, setScData] = useState({});
@@ -1860,6 +2066,9 @@ export default function App() {
   const [rocks, setRocks] = useState([]);
   const [headlines, setHeadlines] = useState([]);
   const [vision, setVision] = useState(VISION_DEFAULT);
+  const [seats, setSeats] = useState(SEATS_DEFAULT);
+  const [peopleAnalyzer, setPeopleAnalyzer] = useState(PEOPLE_ANALYZER_DEFAULT);
+  const [processes, setProcesses] = useState([]);
   const [loaded, setLoaded] = useState(false);
   const [sbCollapsed, setSbCollapsed] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
@@ -1868,7 +2077,7 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
-      const [t, s, sd, m, i, tm, r, h, v, tms, pr] = await Promise.all([
+      const [t, s, sd, m, i, tm, r, h, v, tms, pr, st, pa, pc] = await Promise.all([
         load(STORAGE_KEYS.todos, []),
         load(STORAGE_KEYS.scorecard, SC_DEFAULT),
         load(STORAGE_KEYS.scData, {}),
@@ -1880,8 +2089,11 @@ export default function App() {
         load(STORAGE_KEYS.vision, VISION_DEFAULT),
         load(STORAGE_KEYS.teams, TEAMS_DEFAULT),
         load(STORAGE_KEYS.profile, PROFILE_DEFAULT),
+        load(STORAGE_KEYS.seats, SEATS_DEFAULT),
+        load(STORAGE_KEYS.peopleAnalyzer, PEOPLE_ANALYZER_DEFAULT),
+        load(STORAGE_KEYS.processes, []),
       ]);
-      setTodos(t); setScorecard(s); setScData(sd); setMeetings(m); setIssues(i); setTeam(tm); setRocks(r); setHeadlines(h); setVision(v); setTeams(tms); setProfile(pr);
+      setTodos(t); setScorecard(s); setScData(sd); setMeetings(m); setIssues(i); setTeam(tm); setRocks(r); setHeadlines(h); setVision(v); setTeams(tms); setProfile(pr); setSeats(st); setPeopleAnalyzer(pa); setProcesses(pc);
       setLoaded(true);
     })();
   }, []);
@@ -1897,45 +2109,56 @@ export default function App() {
   useEffect(() => { if (loaded) save(STORAGE_KEYS.vision, vision); }, [vision, loaded]);
   useEffect(() => { if (loaded) save(STORAGE_KEYS.teams, teams); }, [teams, loaded]);
   useEffect(() => { if (loaded) save(STORAGE_KEYS.profile, profile); }, [profile, loaded]);
+  useEffect(() => { if (loaded) save(STORAGE_KEYS.seats, seats); }, [seats, loaded]);
+  useEffect(() => { if (loaded) save(STORAGE_KEYS.peopleAnalyzer, peopleAnalyzer); }, [peopleAnalyzer, loaded]);
+  useEffect(() => { if (loaded) save(STORAGE_KEYS.processes, processes); }, [processes, loaded]);
 
-  // ── Cross-tab real-time sync ──────────────────────────────────────────────
-  // The `storage` event fires in every OTHER tab when localStorage changes,
-  // giving instant sync across multiple users on the same device/browser.
-  // To extend this to different devices, replace the save/load helpers above
-  // with API calls and add a WebSocket/SSE listener here instead.
-  const [syncedAt, setSyncedAt] = useState(null);
-  useEffect(() => {
-    const handler = e => {
-      if (!e.key || e.newValue === null) return;
-      try {
-        const val = JSON.parse(e.newValue);
-        if (e.key === STORAGE_KEYS.todos)     setTodos(val);
-        else if (e.key === STORAGE_KEYS.scorecard) setScorecard(val);
-        else if (e.key === STORAGE_KEYS.scData)    setScData(val);
-        else if (e.key === STORAGE_KEYS.meetings)  setMeetings(val);
-        else if (e.key === STORAGE_KEYS.issues)    setIssues(val);
-        else if (e.key === STORAGE_KEYS.team)      setTeam(val);
-        else if (e.key === STORAGE_KEYS.rocks)     setRocks(val);
-        else if (e.key === STORAGE_KEYS.headlines) setHeadlines(val);
-        else if (e.key === STORAGE_KEYS.vision)    setVision(val);
-        else if (e.key === STORAGE_KEYS.teams)     setTeams(val);
-        else if (e.key === STORAGE_KEYS.profile)   setProfile(val);
-        else return;
-        setSyncedAt(new Date());
-      } catch {}
+  const exportBackup = () => {
+    const payload = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      data: { todos, scorecard, scData, meetings, issues, team, teams, rocks, headlines, vision, profile, seats, peopleAnalyzer, processes }
     };
-    window.addEventListener("storage", handler);
-    return () => window.removeEventListener("storage", handler);
-  }, []);
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `eos-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importBackup = file => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      let data;
+      try {
+        const parsed = JSON.parse(String(reader.result));
+        data = parsed.data || parsed;
+      } catch {
+        window.alert("Could not read backup file. Make sure it's a valid export from this app.");
+        return;
+      }
+      if (!window.confirm("This will replace all data currently stored in this browser with the contents of the backup file. Continue?")) return;
+      setTodos(data.todos || []);
+      setScorecard(data.scorecard || SC_DEFAULT);
+      setScData(data.scData || {});
+      setMeetings(data.meetings || {});
+      setIssues(data.issues || []);
+      setTeam(data.team || TEAM_DEFAULT);
+      setTeams(data.teams || TEAMS_DEFAULT);
+      setRocks(data.rocks || []);
+      setHeadlines(data.headlines || []);
+      setVision(data.vision || VISION_DEFAULT);
+      setProfile(data.profile || PROFILE_DEFAULT);
+      setSeats(data.seats || SEATS_DEFAULT);
+      setPeopleAnalyzer(data.peopleAnalyzer || PEOPLE_ANALYZER_DEFAULT);
+      setProcesses(data.processes || []);
+    };
+    reader.readAsText(file);
+  };
 
   if (!loaded) return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: "#F8F9FA", color: "#9CA3AF" }}><style>{CSS}</style>Loading...</div>;
-
-  // Derive logged-in user's team ID from profile name; fall back to first real member
-  const myId = (() => {
-    const fullName = `${profile.firstName} ${profile.lastName}`.trim();
-    if (fullName) { const found = team.find(m => m.name === fullName); if (found) return found.id; }
-    return team.find(m => m.id !== "2")?.id || "1";
-  })();
 
   const activeTeam = teams.find(t => t.id === activeTeamId);
   const activeMemberIds = activeTeamId === "all" ? team.filter(m => m.id !== "2").map(m => m.id) : (activeTeam?.memberIds || []);
@@ -1947,18 +2170,19 @@ export default function App() {
     { id: "rocks", label: "Rocks", icon: <Ic.Rocks /> },
     { id: "todos", label: "To-Dos", icon: <Ic.Todos /> },
     { id: "issues", label: "Issues", icon: <Ic.Issues /> },
+    { id: "processes", label: "Processes", icon: <Ic.Process /> },
     { id: "meetings", label: "Meetings", icon: <Ic.Meetings /> },
     { id: "headlines", label: "Headlines", icon: <Ic.Headlines /> },
   ];
-  const navExtra = [{ id: "vision", label: "Vision / V/TO", icon: <Ic.Vision /> }, { id: "org", label: "Org Chart", icon: <Ic.OrgChart /> }, { id: "team", label: "Team", icon: <Ic.Team /> }];
+  const navExtra = [{ id: "vision", label: "Vision / V/TO", icon: <Ic.Vision /> }, { id: "accountability", label: "Accountability Chart", icon: <Ic.OrgChart /> }, { id: "team", label: "Team", icon: <Ic.Team /> }];
   const sbW = sbCollapsed ? 56 : 228;
 
   return <div className="shell">
     <style>{CSS}</style>
     {!mob && <nav className="sb" style={{ width: sbW, minWidth: sbW }}>
       <div className="sb-head">
-        {!sbCollapsed && <><div className="sb-logo">T</div><div className="sb-co">TMJ Sleep<small>NW</small></div></> }
-        {sbCollapsed && <div className="sb-logo" style={{ margin: "0 auto" }}>T</div>}
+        {!sbCollapsed && <><div className="sb-logo">{(orgName || "?")[0].toUpperCase()}</div><div className="sb-co">{orgName}</div></> }
+        {sbCollapsed && <div className="sb-logo" style={{ margin: "0 auto" }}>{(orgName || "?")[0].toUpperCase()}</div>}
         {!sbCollapsed && <button className="sb-toggle-btn" onClick={() => setSbCollapsed(true)}><Ic.Chevron dir="left" /></button>}
       </div>
       {!sbCollapsed && <div className="sb-team-picker"><select value={activeTeamId} onChange={e => setActiveTeamId(e.target.value)}><option value="all">All Teams</option>{teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select><span className="sb-team-picker-icon"><Ic.Down /></span></div>}
@@ -1971,33 +2195,28 @@ export default function App() {
     </nav>}
     <div className="main">
       <div style={{ height: 44, background: "var(--white)", borderBottom: "1px solid var(--brd)", display: "flex", alignItems: "center", justifyContent: "flex-end", padding: "0 20px", gap: 8, flexShrink: 0 }}>
-        {syncedAt && <span style={{ fontSize: 11, color: "var(--green-t)", display: "flex", alignItems: "center", gap: 4 }}>
-          <svg width="8" height="8" viewBox="0 0 8 8"><circle cx="4" cy="4" r="4" fill="currentColor"/></svg>
-          Synced {syncedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-        </span>}
         <button onClick={() => setNotifOpen(!notifOpen)} style={{ position: "relative", background: "none", border: "none", cursor: "pointer", padding: 6, borderRadius: 8, color: notifOpen ? "var(--blue)" : "var(--t2)", display: "flex", alignItems: "center", transition: "all .12s" }}>
           <Ic.Bell />{activeTodos + openIssues > 0 && <span style={{ position: "absolute", top: 1, right: 1, background: "var(--red)", color: "#fff", borderRadius: 10, fontSize: 9, fontWeight: 700, padding: "1px 4px", minWidth: 14, textAlign: "center", lineHeight: "14px" }}>{activeTodos + openIssues}</span>}
         </button>
-        <button onClick={() => { if (page === "profile") { setPage(prevPage); } else { setPrevPage(page); setPage("profile"); } }} style={{ display: "flex", alignItems: "center", gap: 7, padding: "4px 10px 4px 6px", border: "1px solid var(--brd)", borderRadius: 20, background: page === "profile" ? "var(--blue-l)" : "var(--white)", cursor: "pointer", transition: "all .12s", color: page === "profile" ? "var(--blue)" : "var(--t2)" }}>
-          <div style={{ width: 24, height: 24, borderRadius: "50%", background: "#4A90D9", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700, color: "#fff" }}>
-            {(profile.firstName || "?").slice(0,1)}{(profile.lastName || "").slice(0,1)}
-          </div>
+        <button onClick={() => setPage("profile")} style={{ display: "flex", alignItems: "center", gap: 7, padding: "4px 10px 4px 6px", border: "1px solid var(--brd)", borderRadius: 20, background: page === "profile" ? "var(--blue-l)" : "var(--white)", cursor: "pointer", transition: "all .12s", color: page === "profile" ? "var(--blue)" : "var(--t2)" }}>
+          <div style={{ width: 24, height: 24, borderRadius: "50%", background: "#4A90D9", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700, color: "#fff" }}>{`${profile.firstName?.[0] || ""}${profile.lastName?.[0] || ""}`.toUpperCase()}</div>
           <span style={{ fontSize: 12, fontWeight: 600 }}>{profile.firstName}</span>
         </button>
       </div>
       {page === "dashboard" && <DashboardPage {...{ todos, setTodos, rocks, issues, scorecard, scData, team, activeMemberIds, setPage }} />}
-      {page === "todos" && <TodosPage {...{ todos, setTodos, team, activeMemberIds, myId }} />}
+      {page === "todos" && <TodosPage {...{ todos, setTodos, team, activeMemberIds, rocks }} />}
       {page === "scorecard" && <ScorecardPage {...{ scorecard, setScorecard, scData, setScData, team, activeMemberIds, mob }} />}
-      {page === "rocks" && <RocksPage {...{ rocks, setRocks, team, activeMemberIds }} />}
-      {page === "issues" && <IssuesPage {...{ issues, setIssues, team, activeMemberIds }} />}
-      {page === "meetings" && <MeetingsPage {...{ meetings, setMeetings, issues, setIssues, todos, setTodos, rocks, setRocks, team, activeMemberIds }} />}
+      {page === "rocks" && <RocksPage {...{ rocks, setRocks, team, activeMemberIds, issues, todos }} />}
+      {page === "issues" && <IssuesPage {...{ issues, setIssues, team, activeMemberIds, rocks, todos, setTodos }} />}
+      {page === "processes" && <ProcessesPage {...{ processes, setProcesses, team, activeMemberIds }} />}
+      {page === "meetings" && <MeetingsPage {...{ meetings, setMeetings, issues, todos, team, activeMemberIds }} />}
       {page === "headlines" && <HeadlinesPage {...{ headlines, setHeadlines, team, activeMemberIds }} />}
       {page === "vision" && <VisionPage {...{ vision, setVision }} />}
-      {page === "org" && <OrgChartPage {...{ teams, team }} />}
+      {page === "accountability" && <AccountabilityChartPage {...{ seats, setSeats, team, vision, peopleAnalyzer, setPeopleAnalyzer }} />}
       {page === "team" && <TeamPage {...{ team, setTeam, teams, setTeams }} />}
-      {page === "profile" && <ProfilePage {...{ profile, setProfile }} />}
+      {page === "profile" && <ProfilePage {...{ profile, setProfile, onExportBackup: exportBackup, onImportBackup: importBackup }} />}
     </div>
-    {mob && <MobileNav page={page} setPage={setPage} navMain={navMain} activeTodos={activeTodos} openIssues={openIssues} />}
+    {mob && <MobileNav page={page} setPage={setPage} navMain={navMain} navExtra={navExtra} activeTodos={activeTodos} openIssues={openIssues} />}
     {notifOpen && <NotificationsPanel onClose={() => setNotifOpen(false)} todos={todos} rocks={rocks} issues={issues} scorecard={scorecard.filter(m => activeMemberIds.includes(m.owner))} scData={scData} />}
   </div>;
 }

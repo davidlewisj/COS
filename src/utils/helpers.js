@@ -120,6 +120,29 @@ export function scaleGoal(metric, tab) {
   return Math.round(metric.goal * (PERIOD_WEEKS[tab] || 1));
 }
 
+// Split textarea content into a trimmed, non-empty list of lines
+export function parseLines(text) {
+  return String(text || "")
+    .split("\n")
+    .map(line => line.trim())
+    .filter(Boolean);
+}
+
+// Completion progress for a rock's milestones
+export function milestoneProgress(milestones) {
+  const list = Array.isArray(milestones) ? milestones : [];
+  return { done: list.filter(m => m.done).length, total: list.length };
+}
+
+// Current quarter label, e.g. "Q1 2026"
+export function currentQuarterLabel(offset = 0) {
+  const now = new Date();
+  const totalQ = now.getFullYear() * 4 + Math.floor(now.getMonth() / 3) + offset;
+  const yr = Math.floor(totalQ / 4);
+  const qn = ((totalQ % 4) + 4) % 4;
+  return `Q${qn + 1} ${yr}`;
+}
+
 // Format date
 export function fmtDate(s) {
   if (!s) return "";
@@ -133,12 +156,11 @@ export function isOverdue(s) {
   return new Date(s + "T23:59:59") < new Date();
 }
 
-// Storage operations (localStorage-backed; swap these two functions for an API
-// client once a backend exists — the call sites in App.jsx won't need to change)
+// Storage operations (backed by localStorage)
 export async function load(key, fallback) {
   try {
-    const raw = localStorage.getItem(key);
-    return raw !== null ? JSON.parse(raw) : fallback;
+    const raw = window.localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
   } catch {
     return fallback;
   }
@@ -146,7 +168,7 @@ export async function load(key, fallback) {
 
 export async function save(key, value) {
   try {
-    localStorage.setItem(key, JSON.stringify(value));
+    window.localStorage.setItem(key, JSON.stringify(value));
   } catch (e) {
     console.error(e);
   }
