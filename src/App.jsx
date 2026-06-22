@@ -1927,7 +1927,7 @@ function ProfilePage({ profile, setProfile, onExportBackup, onImportBackup }) {
 }
 
 // MAIN APP
-export default function App() {
+export default function App({ orgName }) {
   const [page, setPage] = useState("dashboard");
   const [todos, setTodos] = useState([]);
   const [scorecard, setScorecard] = useState([]);
@@ -2055,8 +2055,8 @@ export default function App() {
     <style>{CSS}</style>
     {!mob && <nav className="sb" style={{ width: sbW, minWidth: sbW }}>
       <div className="sb-head">
-        {!sbCollapsed && <><div className="sb-logo">T</div><div className="sb-co">TMJ Sleep<small>NW</small></div></> }
-        {sbCollapsed && <div className="sb-logo" style={{ margin: "0 auto" }}>T</div>}
+        {!sbCollapsed && <><div className="sb-logo">{(orgName || "?")[0].toUpperCase()}</div><div className="sb-co">{orgName}</div></> }
+        {sbCollapsed && <div className="sb-logo" style={{ margin: "0 auto" }}>{(orgName || "?")[0].toUpperCase()}</div>}
         {!sbCollapsed && <button className="sb-toggle-btn" onClick={() => setSbCollapsed(true)}><Ic.Chevron dir="left" /></button>}
       </div>
       {!sbCollapsed && <div className="sb-team-picker"><select value={activeTeamId} onChange={e => setActiveTeamId(e.target.value)}><option value="all">All Teams</option>{teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select><span className="sb-team-picker-icon"><Ic.Down /></span></div>}

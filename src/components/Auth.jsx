@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { cloneElement, useEffect, useState } from "react";
 import { CSS } from "../constants";
 import {
   signIn, signUp, signOut, getSession, onAuthStateChange, getMembership,
@@ -111,23 +111,25 @@ function OrgSetup({ session, onReady }) {
 
 export default function AuthGate({ children }) {
   const [session, setSession] = useState(undefined);
-  const [hasOrg, setHasOrg] = useState(undefined);
+  const [membership, setMembership] = useState(undefined);
 
   useEffect(() => {
     getSession().then(setSession);
     return onAuthStateChange(setSession);
   }, []);
 
+  const refreshMembership = () => getMembership().then(setMembership).catch(() => setMembership(null));
+
   useEffect(() => {
     if (session === undefined) return;
-    if (!session) { setHasOrg(undefined); return; }
-    setHasOrg(undefined);
-    getMembership().then(m => setHasOrg(!!m)).catch(() => setHasOrg(false));
+    if (!session) { setMembership(undefined); return; }
+    setMembership(undefined);
+    refreshMembership();
   }, [session]);
 
   if (session === undefined) return <AuthShell><div className="sub">Loading…</div></AuthShell>;
   if (!session) return <LoginSignup onAuthed={setSession} />;
-  if (hasOrg === undefined) return <AuthShell><div className="sub">Loading…</div></AuthShell>;
-  if (!hasOrg) return <OrgSetup session={session} onReady={() => setHasOrg(true)} />;
-  return children;
+  if (membership === undefined) return <AuthShell><div className="sub">Loading…</div></AuthShell>;
+  if (!membership) return <OrgSetup session={session} onReady={refreshMembership} />;
+  return cloneElement(children, { orgName: membership.organizations?.name });
 }
