@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, Fragment } from "react";
 import { STORAGE_KEYS, PROFILE_DEFAULT, TEAM_DEFAULT, TEAMS_DEFAULT, SC_DEFAULT, VISION_DEFAULT, SEATS_DEFAULT, PEOPLE_ANALYZER_DEFAULT, CSS } from "./constants";
 import { uid, getWeekRange, getPeriods, getRollupVal, scaleGoal, parseLines, currentQuarterLabel, milestoneProgress, load, save, fmtDate, isOverdue } from "./utils/helpers";
 import { useIsMobile } from "./hooks/useIsMobile";
@@ -534,6 +534,7 @@ function RocksPage({ rocks, setRocks, team, activeMemberIds, issues, todos }) {
   const [form, setForm] = useState({ title: "", owner: "1", dueDate: "", status: "on-track", quarter: "", milestones: [] });
   const [msTitle, setMsTitle] = useState("");
   const [msDue, setMsDue] = useState("");
+  const [expandedRocks, setExpandedRocks] = useState({});
 
   const now = new Date();
   const qNum = Math.floor(now.getMonth() / 3) + 1;
@@ -594,6 +595,16 @@ function RocksPage({ rocks, setRocks, team, activeMemberIds, issues, todos }) {
 
   const setRockStatus = (id, status) => {
     setRocks(prev => prev.map(r => (r.id === id ? { ...r, status } : r)));
+  };
+
+  const toggleRowExpanded = id => {
+    setExpandedRocks(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const toggleRockMilestone = (rockId, msId) => {
+    setRocks(prev => prev.map(r => (r.id === rockId
+      ? { ...r, milestones: (r.milestones || []).map(m => (m.id === msId ? { ...m, done: !m.done } : m)) }
+      : r)));
   };
 
   const addMilestone = () => {
@@ -686,22 +697,46 @@ function RocksPage({ rocks, setRocks, team, activeMemberIds, issues, todos }) {
                 const m = team.find(x => x.id === rock.owner) || team[1];
                 const overdue = rock.status !== "completed" && isOverdue(rock.dueDate);
                 const { done: msDone, total: msTotal } = milestoneProgress(rock.milestones);
-                return <tr key={rock.id}>
-                  <td>{rock.title}</td>
-                  <td>
-                    {msTotal === 0 ? <span style={{ color: "var(--t3)" }}>-</span> : <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <div className="progress-bar"><div className="progress-fill" style={{ width: `${(msDone / msTotal) * 100}%` }} /></div>
-                      <span style={{ fontSize: 12, color: "var(--t2)", whiteSpace: "nowrap" }}>{msDone}/{msTotal}</span>
-                    </div>}
-                  </td>
-                  <td style={{ color: "var(--t2)" }}>{rock.quarter || "-"}</td>
-                  <td style={{ color: overdue ? "var(--red-t)" : "var(--t2)" }}>{overdue && <Ic.Warn />}{fmtDate(rock.dueDate)}</td>
-                  <td><Av m={m} /></td>
-                  <td>
-                    <RockStatusBadge rock={rock} onChange={setRockStatus} />
-                  </td>
-                  <td><button className="btn-ghost" onClick={() => openEdit(rock)}>Edit</button></td>
-                </tr>;
+                const expanded = msTotal > 0 && !!expandedRocks[rock.id];
+                return <Fragment key={rock.id}>
+                  <tr>
+                    <td>{rock.title}</td>
+                    <td>
+                      {msTotal === 0 ? <span style={{ color: "var(--t3)" }}>-</span> : (
+                        <button
+                          className="btn-ghost"
+                          style={{ display: "flex", alignItems: "center", gap: 8, padding: 0, width: "100%", textAlign: "left" }}
+                          onClick={() => toggleRowExpanded(rock.id)}
+                          title={expanded ? "Hide milestones" : "Show milestones"}
+                        >
+                          <Ic.Chevron dir={expanded ? "down" : "right"} />
+                          <div className="progress-bar"><div className="progress-fill" style={{ width: `${(msDone / msTotal) * 100}%` }} /></div>
+                          <span style={{ fontSize: 12, color: "var(--t2)", whiteSpace: "nowrap" }}>{msDone}/{msTotal}</span>
+                        </button>
+                      )}
+                    </td>
+                    <td style={{ color: "var(--t2)" }}>{rock.quarter || "-"}</td>
+                    <td style={{ color: overdue ? "var(--red-t)" : "var(--t2)" }}>{overdue && <Ic.Warn />}{fmtDate(rock.dueDate)}</td>
+                    <td><Av m={m} /></td>
+                    <td>
+                      <RockStatusBadge rock={rock} onChange={setRockStatus} />
+                    </td>
+                    <td><button className="btn-ghost" onClick={() => openEdit(rock)}>Edit</button></td>
+                  </tr>
+                  {expanded && <tr>
+                    <td colSpan={7} style={{ padding: 0 }}>
+                      <div className="rock-ms-panel" style={{ paddingLeft: 16 }}>
+                        {rock.milestones.map(ms => (
+                          <div key={ms.id} className="rock-ms-item">
+                            <CircleCk on={ms.done} toggle={() => toggleRockMilestone(rock.id, ms.id)} />
+                            <span className={`rock-ms-item-txt${ms.done ? " done" : ""}`}>{ms.title}</span>
+                            {ms.dueDate && <span style={{ fontSize: 11, color: "var(--t3)", whiteSpace: "nowrap" }}>{fmtDate(ms.dueDate)}</span>}
+                          </div>
+                        ))}
+                      </div>
+                    </td>
+                  </tr>}
+                </Fragment>;
               })}
             </tbody>
           </table>
