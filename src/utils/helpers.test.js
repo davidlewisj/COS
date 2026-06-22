@@ -8,10 +8,13 @@ import {
   weekBelongsTo,
   getRollupVal,
   scaleGoal,
+  parseLines,
+  currentQuarterLabel,
   fmtDate,
   isOverdue,
   load,
-  save
+  save,
+  milestoneProgress
 } from "./helpers";
 
 describe("uid", () => {
@@ -115,6 +118,33 @@ describe("scaleGoal", () => {
   });
 });
 
+describe("parseLines", () => {
+  it("splits on newlines and trims whitespace", () => {
+    expect(parseLines("  a \n b\n\nc  ")).toEqual(["a", "b", "c"]);
+  });
+
+  it("returns an empty array for falsy input", () => {
+    expect(parseLines("")).toEqual([]);
+    expect(parseLines(null)).toEqual([]);
+    expect(parseLines(undefined)).toEqual([]);
+  });
+});
+
+describe("currentQuarterLabel", () => {
+  it("matches the current year and quarter with no offset", () => {
+    const now = new Date();
+    const qn = Math.floor(now.getMonth() / 3) + 1;
+    expect(currentQuarterLabel(0)).toBe(`Q${qn} ${now.getFullYear()}`);
+  });
+
+  it("wraps to the previous year when offset crosses a year boundary", () => {
+    const now = new Date();
+    const currentQuarter = Math.floor(now.getMonth() / 3);
+    const label = currentQuarterLabel(-(currentQuarter + 1));
+    expect(label).toBe(`Q4 ${now.getFullYear() - 1}`);
+  });
+});
+
 describe("fmtDate", () => {
   it("formats a YYYY-MM-DD string as 'Mon D'", () => {
     expect(fmtDate("2024-01-05")).toBe("Jan 5");
@@ -137,6 +167,18 @@ describe("isOverdue", () => {
 
   it("returns false for a date far in the future", () => {
     expect(isOverdue("2999-01-01")).toBe(false);
+  });
+});
+
+describe("milestoneProgress", () => {
+  it("counts done vs total milestones", () => {
+    const milestones = [{ done: true }, { done: false }, { done: true }];
+    expect(milestoneProgress(milestones)).toEqual({ done: 2, total: 3 });
+  });
+
+  it("returns zeros for a non-array input", () => {
+    expect(milestoneProgress(undefined)).toEqual({ done: 0, total: 0 });
+    expect(milestoneProgress(null)).toEqual({ done: 0, total: 0 });
   });
 });
 

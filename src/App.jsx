@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
-import { STORAGE_KEYS, PROFILE_DEFAULT, TEAM_DEFAULT, TEAMS_DEFAULT, SC_DEFAULT, VISION_DEFAULT, CSS } from "./constants";
-import { uid, getWeekRange, getPeriods, getRollupVal, scaleGoal, load, save, fmtDate, isOverdue } from "./utils/helpers";
+import { STORAGE_KEYS, PROFILE_DEFAULT, TEAM_DEFAULT, TEAMS_DEFAULT, SC_DEFAULT, VISION_DEFAULT, SEATS_DEFAULT, PEOPLE_ANALYZER_DEFAULT, CSS } from "./constants";
+import { uid, getWeekRange, getPeriods, getRollupVal, scaleGoal, parseLines, currentQuarterLabel, milestoneProgress, load, save, fmtDate, isOverdue } from "./utils/helpers";
 import { useIsMobile } from "./hooks/useIsMobile";
 import { Ic } from "./components/Icons";
 import { Av, CircleCk, Modal, EmptySVG, DonutChart, MiniBarChart } from "./components/Shared";
@@ -95,18 +95,18 @@ function DashboardPage({ todos, setTodos, rocks, issues, scorecard, scData, team
 }
 
 // TODOS PAGE
-function TodosPage({ todos, setTodos, team, activeMemberIds }) {
+function TodosPage({ todos, setTodos, team, activeMemberIds, rocks }) {
   const [tab, setTab] = useState("team");
   const [search, setSearch] = useState("");
   const [archive, setArchive] = useState(false);
   const [ownerFilter, setOwnerFilter] = useState("all");
   const [modal, setModal] = useState(null);
-  const [form, setForm] = useState({ title: "", owner: "1", dueDate: "" });
+  const [form, setForm] = useState({ title: "", owner: "1", dueDate: "", rockId: "" });
 
   const openAdd = () => {
     const d = new Date();
     d.setDate(d.getDate() + 7);
-    setForm({ title: "", owner: "1", dueDate: d.toISOString().split("T")[0] });
+    setForm({ title: "", owner: "1", dueDate: d.toISOString().split("T")[0], rockId: "" });
     setModal("add");
   };
   const filtered = todos.filter(t => {
@@ -141,9 +141,10 @@ function TodosPage({ todos, setTodos, team, activeMemberIds }) {
           {filtered.map(t => {
             const m = team.find(x => x.id === t.owner) || team[1];
             const od = isOverdue(t.dueDate) && !t.done;
+            const linkedRock = t.rockId && rocks.find(r => r.id === t.rockId);
             return <tr key={t.id}>
               <td><CircleCk on={t.done} toggle={() => setTodos(p => p.map(x => x.id === t.id ? { ...x, done: !x.done } : x))} /></td>
-              <td>{t.title}</td>
+              <td>{t.title}{linkedRock && <span className="tag" style={{ marginLeft: 8 }}>{linkedRock.title}</span>}</td>
               <td style={{ color: od ? "var(--red-t)" : "var(--t2)" }}>{od && <Ic.Warn />}{fmtDate(t.dueDate)}</td>
               <td><Av m={m} /></td>
             </tr>;
@@ -158,10 +159,17 @@ function TodosPage({ todos, setTodos, team, activeMemberIds }) {
           <div className="field" style={{ flex: 1 }}><label>Owner</label><select value={form.owner} onChange={e => setForm({ ...form, owner: e.target.value })}>{team.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select></div>
           <div className="field" style={{ flex: 1 }}><label>Due Date</label><input type="date" value={form.dueDate} onChange={e => setForm({ ...form, dueDate: e.target.value })} /></div>
         </div>
+        <div className="field" style={{ marginBottom: 0 }}>
+          <label>Linked rock (optional)</label>
+          <select value={form.rockId} onChange={e => setForm({ ...form, rockId: e.target.value })}>
+            <option value="">None</option>
+            {rocks.map(r => <option key={r.id} value={r.id}>{r.title}</option>)}
+          </select>
+        </div>
       </div>
       <div className="modal-foot">
         <button className="btn" onClick={() => setModal(null)}>Cancel</button>
-        <button className="btn btn-p" onClick={() => { if (form.title.trim()) { setTodos(p => [...p, { id: uid(), ...form, done: false, createdAt: new Date().toISOString() }]); setModal(null); } }}>Create</button>
+        <button className="btn btn-p" onClick={() => { if (form.title.trim()) { setTodos(p => [...p, { id: uid(), ...form, rockId: form.rockId || null, done: false, createdAt: new Date().toISOString() }]); setModal(null); } }}>Create</button>
       </div>
     </Modal>}
   </>;
@@ -413,14 +421,16 @@ function ScorecardPage({ scorecard, setScorecard, scData, setScData, team, activ
 }
 
 // PLACEHOLDER PAGES
-function RocksPage({ rocks, setRocks, team, activeMemberIds }) {
+function RocksPage({ rocks, setRocks, team, activeMemberIds, issues, todos }) {
   const [tab, setTab] = useState("active");
   const [search, setSearch] = useState("");
   const [ownerFilter, setOwnerFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [modal, setModal] = useState(null);
   const [editId, setEditId] = useState(null);
-  const [form, setForm] = useState({ title: "", owner: "1", dueDate: "", status: "on-track", quarter: "" });
+  const [form, setForm] = useState({ title: "", owner: "1", dueDate: "", status: "on-track", quarter: "", milestones: [] });
+  const [msTitle, setMsTitle] = useState("");
+  const [msDue, setMsDue] = useState("");
 
   const now = new Date();
   const qNum = Math.floor(now.getMonth() / 3) + 1;
@@ -434,7 +444,9 @@ function RocksPage({ rocks, setRocks, team, activeMemberIds }) {
 
   const openAdd = () => {
     setEditId(null);
-    setForm({ title: "", owner: "1", dueDate: defaultDueDate(), status: "on-track", quarter: qLabel });
+    setForm({ title: "", owner: "1", dueDate: defaultDueDate(), status: "on-track", quarter: qLabel, milestones: [] });
+    setMsTitle("");
+    setMsDue("");
     setModal("rock");
   };
 
@@ -445,8 +457,11 @@ function RocksPage({ rocks, setRocks, team, activeMemberIds }) {
       owner: rock.owner || "1",
       dueDate: rock.dueDate || defaultDueDate(),
       status: rock.status || "on-track",
-      quarter: rock.quarter || qLabel
+      quarter: rock.quarter || qLabel,
+      milestones: rock.milestones || []
     });
+    setMsTitle("");
+    setMsDue("");
     setModal("rock");
   };
 
@@ -458,7 +473,8 @@ function RocksPage({ rocks, setRocks, team, activeMemberIds }) {
       owner: form.owner,
       dueDate: form.dueDate,
       status: form.status,
-      quarter: form.quarter || qLabel
+      quarter: form.quarter || qLabel,
+      milestones: form.milestones
     };
     if (editId) {
       setRocks(prev => prev.map(r => (r.id === editId ? { ...r, ...payload } : r)));
@@ -476,6 +492,25 @@ function RocksPage({ rocks, setRocks, team, activeMemberIds }) {
   const setRockStatus = (id, status) => {
     setRocks(prev => prev.map(r => (r.id === id ? { ...r, status } : r)));
   };
+
+  const addMilestone = () => {
+    const title = msTitle.trim();
+    if (!title) return;
+    setForm(prev => ({ ...prev, milestones: [...prev.milestones, { id: uid(), title, done: false, dueDate: msDue }] }));
+    setMsTitle("");
+    setMsDue("");
+  };
+
+  const toggleMilestone = id => {
+    setForm(prev => ({ ...prev, milestones: prev.milestones.map(m => (m.id === id ? { ...m, done: !m.done } : m)) }));
+  };
+
+  const removeMilestone = id => {
+    setForm(prev => ({ ...prev, milestones: prev.milestones.filter(m => m.id !== id) }));
+  };
+
+  const linkedIssues = editId ? issues.filter(i => i.rockId === editId) : [];
+  const linkedTodos = editId ? todos.filter(t => t.rockId === editId) : [];
 
   const filtered = rocks
     .filter(r => {
@@ -534,6 +569,7 @@ function RocksPage({ rocks, setRocks, team, activeMemberIds }) {
             <thead>
               <tr>
                 <th>Title</th>
+                <th style={{ width: 130 }}>Milestones</th>
                 <th style={{ width: 110 }}>Quarter</th>
                 <th style={{ width: 110 }}>Due</th>
                 <th style={{ width: 90 }}>Owner</th>
@@ -545,8 +581,15 @@ function RocksPage({ rocks, setRocks, team, activeMemberIds }) {
               {filtered.map(rock => {
                 const m = team.find(x => x.id === rock.owner) || team[1];
                 const overdue = rock.status !== "completed" && isOverdue(rock.dueDate);
+                const { done: msDone, total: msTotal } = milestoneProgress(rock.milestones);
                 return <tr key={rock.id}>
                   <td>{rock.title}</td>
+                  <td>
+                    {msTotal === 0 ? <span style={{ color: "var(--t3)" }}>-</span> : <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <div className="progress-bar"><div className="progress-fill" style={{ width: `${(msDone / msTotal) * 100}%` }} /></div>
+                      <span style={{ fontSize: 12, color: "var(--t2)", whiteSpace: "nowrap" }}>{msDone}/{msTotal}</span>
+                    </div>}
+                  </td>
                   <td style={{ color: "var(--t2)" }}>{rock.quarter || "-"}</td>
                   <td style={{ color: overdue ? "var(--red-t)" : "var(--t2)" }}>{overdue && <Ic.Warn />}{fmtDate(rock.dueDate)}</td>
                   <td><Av m={m} /></td>
@@ -600,6 +643,31 @@ function RocksPage({ rocks, setRocks, team, activeMemberIds }) {
             </select>
           </div>
         </div>
+
+        <div className="field" style={{ marginBottom: 0 }}>
+          <label>Milestones{form.milestones.length > 0 ? ` (${form.milestones.filter(m => m.done).length}/${form.milestones.length})` : ""}</label>
+          {form.milestones.map(ms => (
+            <div className="ms-row" key={ms.id}>
+              <CircleCk on={ms.done} toggle={() => toggleMilestone(ms.id)} />
+              <span className={`ms-title${ms.done ? " done" : ""}`}>{ms.title}</span>
+              {ms.dueDate && <span className="ms-due">{fmtDate(ms.dueDate)}</span>}
+              <button className="btn-ghost" onClick={() => removeMilestone(ms.id)}><Ic.Trash /></button>
+            </div>
+          ))}
+          <div className="ms-add">
+            <input type="text" value={msTitle} onChange={e => setMsTitle(e.target.value)} placeholder="Add a milestone..." onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addMilestone(); } }} />
+            <input type="date" value={msDue} onChange={e => setMsDue(e.target.value)} />
+            <button className="btn btn-sm" onClick={addMilestone}>Add</button>
+          </div>
+        </div>
+
+        {editId && (linkedIssues.length > 0 || linkedTodos.length > 0) && (
+          <div className="field" style={{ marginBottom: 0, marginTop: 16 }}>
+            <label>Linked Items</label>
+            {linkedIssues.map(i => <div key={i.id} className="ms-row"><span className="tag">Issue</span><span className="ms-title">{i.title}</span></div>)}
+            {linkedTodos.map(t => <div key={t.id} className="ms-row"><span className="tag">To-Do</span><span className="ms-title">{t.title}</span></div>)}
+          </div>
+        )}
       </div>
 
       <div className="modal-foot" style={{ justifyContent: "space-between" }}>
@@ -615,18 +683,18 @@ function RocksPage({ rocks, setRocks, team, activeMemberIds }) {
   </>;
 }
 
-function IssuesPage({ issues, setIssues, team, activeMemberIds }) {
+function IssuesPage({ issues, setIssues, team, activeMemberIds, rocks, todos, setTodos }) {
   const [tab, setTab] = useState("short-term");
   const [search, setSearch] = useState("");
   const [ownerFilter, setOwnerFilter] = useState("all");
   const [modal, setModal] = useState(null);
   const [editId, setEditId] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
-  const [form, setForm] = useState({ title: "", owner: "1", type: "short-term", notes: "" });
+  const [form, setForm] = useState({ title: "", owner: "1", type: "short-term", notes: "", rockId: "" });
 
   const openAdd = () => {
     setEditId(null);
-    setForm({ title: "", owner: "1", type: tab, notes: "" });
+    setForm({ title: "", owner: "1", type: tab, notes: "", rockId: "" });
     setModal("issue");
   };
 
@@ -636,7 +704,8 @@ function IssuesPage({ issues, setIssues, team, activeMemberIds }) {
       title: issue.title || "",
       owner: issue.owner || "1",
       type: issue.type || "short-term",
-      notes: issue.notes || ""
+      notes: issue.notes || "",
+      rockId: issue.rockId || ""
     });
     setModal("issue");
   };
@@ -649,6 +718,7 @@ function IssuesPage({ issues, setIssues, team, activeMemberIds }) {
       owner: form.owner,
       type: form.type,
       notes: form.notes,
+      rockId: form.rockId || null,
       done: false
     };
 
@@ -658,6 +728,21 @@ function IssuesPage({ issues, setIssues, team, activeMemberIds }) {
       setIssues(prev => [...prev, { id: uid(), ...payload, createdAt: new Date().toISOString() }]);
     }
     setModal(null);
+  };
+
+  const createTodoFromIssue = issue => {
+    const d = new Date();
+    d.setDate(d.getDate() + 7);
+    setTodos(prev => [...prev, {
+      id: uid(),
+      title: issue.title,
+      owner: issue.owner,
+      dueDate: d.toISOString().split("T")[0],
+      done: false,
+      rockId: issue.rockId || null,
+      sourceIssueId: issue.id,
+      createdAt: new Date().toISOString()
+    }]);
   };
 
   const setSolved = (id, done) => {
@@ -735,6 +820,7 @@ function IssuesPage({ issues, setIssues, team, activeMemberIds }) {
                   <td onClick={() => setSelectedId(issue.id)} style={{ cursor: "pointer" }}>
                     <div style={{ fontWeight: 600, color: issue.done ? "var(--t3)" : "var(--t1)", textDecoration: issue.done ? "line-through" : "none" }}>{issue.title}</div>
                     {!!issue.notes && <div style={{ fontSize: 12, color: "var(--t3)", marginTop: 2 }}>{issue.notes.slice(0, 110)}{issue.notes.length > 110 ? "..." : ""}</div>}
+                    {issue.rockId && rocks.find(r => r.id === issue.rockId) && <span className="tag" style={{ marginTop: 4, display: "inline-block" }}>{rocks.find(r => r.id === issue.rockId).title}</span>}
                   </td>
                   <td><Av m={m} /></td>
                   <td><button className="btn-ghost" onClick={() => openEdit(issue)}>Edit</button></td>
@@ -751,9 +837,10 @@ function IssuesPage({ issues, setIssues, team, activeMemberIds }) {
           <div style={{ fontSize: 11, color: "var(--t3)", textTransform: "uppercase", fontWeight: 700, letterSpacing: ".05em" }}>Title</div>
           <div style={{ marginTop: 6, fontSize: 15, fontWeight: 600 }}>{selected.title}</div>
 
-          <div style={{ display: "flex", gap: 10, marginTop: 14, alignItems: "center" }}>
+          <div style={{ display: "flex", gap: 10, marginTop: 14, alignItems: "center", flexWrap: "wrap" }}>
             <span className={`status ${selected.done ? "status-on" : "status-off"}`}>{selected.done ? "Solved" : "Open"}</span>
             <span style={{ fontSize: 12, color: "var(--t2)" }}>{(selected.type || "short-term") === "short-term" ? "Short-Term" : "Long-Term"}</span>
+            {selected.rockId && rocks.find(r => r.id === selected.rockId) && <span className="tag">{rocks.find(r => r.id === selected.rockId).title}</span>}
           </div>
 
           <div style={{ marginTop: 16 }}>
@@ -766,9 +853,12 @@ function IssuesPage({ issues, setIssues, team, activeMemberIds }) {
             />
           </div>
 
-          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+          <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
             <button className="btn" onClick={() => setSolved(selected.id, !selected.done)}>{selected.done ? "Reopen" : "Mark solved"}</button>
             <button className="btn" onClick={() => openEdit(selected)}>Edit metadata</button>
+            {todos.some(t => t.sourceIssueId === selected.id)
+              ? <span style={{ fontSize: 12, color: "var(--t3)", alignSelf: "center" }}>✓ To-do created</span>
+              : <button className="btn" onClick={() => createTodoFromIssue(selected)}><Ic.Plus /> Create to-do</button>}
           </div>
         </div>}
       </div>
@@ -797,6 +887,14 @@ function IssuesPage({ issues, setIssues, team, activeMemberIds }) {
           </div>
         </div>
 
+        <div className="field">
+          <label>Linked rock (optional)</label>
+          <select value={form.rockId} onChange={e => setForm({ ...form, rockId: e.target.value })}>
+            <option value="">None</option>
+            {rocks.map(r => <option key={r.id} value={r.id}>{r.title}</option>)}
+          </select>
+        </div>
+
         <div className="field" style={{ marginBottom: 0 }}>
           <label>Notes</label>
           <textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} placeholder="Context and details" rows={5} />
@@ -816,26 +914,265 @@ function IssuesPage({ issues, setIssues, team, activeMemberIds }) {
   </>;
 }
 
-function MeetingsPage({ meetings, setMeetings, issues, todos, team, activeMemberIds }) {
-  const store = meetings && typeof meetings === "object" ? meetings : {};
-  const defaultMeetingRef = useRef({
+const PROCESS_STATUS = {
+  "not-started": { label: "Not Started", cls: "status-muted" },
+  "draft": { label: "Draft", cls: "status-warn" },
+  "documented": { label: "Documented", cls: "status-on" },
+  "fba": { label: "FBA", cls: "status-fba" }
+};
+
+function ProcessesPage({ processes, setProcesses, team, activeMemberIds }) {
+  const [search, setSearch] = useState("");
+  const [ownerFilter, setOwnerFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [modal, setModal] = useState(null);
+  const [editId, setEditId] = useState(null);
+  const [selectedId, setSelectedId] = useState(null);
+  const [form, setForm] = useState({ title: "", owner: "1", status: "not-started", steps: "", notes: "" });
+
+  const openAdd = () => {
+    setEditId(null);
+    setForm({ title: "", owner: "1", status: "not-started", steps: "", notes: "" });
+    setModal("process");
+  };
+
+  const openEdit = proc => {
+    setEditId(proc.id);
+    setForm({
+      title: proc.title || "",
+      owner: proc.owner || "1",
+      status: proc.status || "not-started",
+      steps: (proc.steps || []).join("\n"),
+      notes: proc.notes || ""
+    });
+    setModal("process");
+  };
+
+  const saveProcess = () => {
+    const title = form.title.trim();
+    if (!title) return;
+    const payload = {
+      title,
+      owner: form.owner,
+      status: form.status,
+      steps: parseLines(form.steps),
+      notes: form.notes
+    };
+    if (editId) {
+      setProcesses(prev => prev.map(p => (p.id === editId ? { ...p, ...payload } : p)));
+    } else {
+      setProcesses(prev => [...prev, { id: uid(), ...payload, lastReviewed: null, createdAt: new Date().toISOString() }]);
+    }
+    setModal(null);
+  };
+
+  const removeProcess = id => {
+    setProcesses(prev => prev.filter(p => p.id !== id));
+    if (selectedId === id) setSelectedId(null);
+    setModal(null);
+  };
+
+  const markReviewed = id => {
+    setProcesses(prev => prev.map(p => (p.id === id ? { ...p, lastReviewed: new Date().toISOString().split("T")[0] } : p)));
+  };
+
+  const filtered = processes
+    .filter(p => {
+      if (!activeMemberIds.includes(p.owner)) return false;
+      if (ownerFilter !== "all" && p.owner !== ownerFilter) return false;
+      if (statusFilter !== "all" && (p.status || "not-started") !== statusFilter) return false;
+      if (search && !p.title.toLowerCase().includes(search.toLowerCase())) return false;
+      return true;
+    })
+    .sort((a, b) => (a.title || "").localeCompare(b.title || ""));
+
+  const selected = processes.find(p => p.id === selectedId) || null;
+
+  return <>
+    <div className="phdr">
+      <div className="phdr-top">
+        <div>
+          <h1>Processes</h1>
+          <div className="phdr-desc">Document, standardize, and keep your core processes followed by all.</div>
+        </div>
+        <div className="phdr-actions">
+          <button className="btn btn-p" onClick={openAdd}><Ic.Plus /> Add process</button>
+        </div>
+      </div>
+    </div>
+
+    <div className="toolbar">
+      <select className="tb-filter" value={ownerFilter} onChange={e => setOwnerFilter(e.target.value)}>
+        <option value="all">Owner: All</option>
+        {team.filter(m => m.id !== "2").map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+      </select>
+      <select className="tb-filter" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+        <option value="all">Status: All</option>
+        <option value="not-started">Not Started</option>
+        <option value="draft">Draft</option>
+        <option value="documented">Documented</option>
+        <option value="fba">FBA</option>
+      </select>
+      <div className="tb-search">
+        <Ic.Search />
+        <input placeholder="Search processes..." value={search} onChange={e => setSearch(e.target.value)} />
+      </div>
+    </div>
+
+    <div className="content"><div className="content-inner" style={{ display: "grid", gridTemplateColumns: "1fr minmax(280px, 380px)", gap: 16 }}>
+      <div className="sec" style={{ marginBottom: 0 }}>
+        <div className="sec-hdr">
+          <h2>Process List<span className="count">{filtered.length}</span></h2>
+        </div>
+
+        {filtered.length === 0 ? <div className="empty"><h3>No processes documented</h3><p>Add your first core process to start building your playbook.</p></div> : (
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>Title</th>
+                <th style={{ width: 120 }}>Status</th>
+                <th style={{ width: 100 }}>Reviewed</th>
+                <th style={{ width: 85 }}>Owner</th>
+                <th style={{ width: 70 }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(proc => {
+                const m = team.find(x => x.id === proc.owner) || team[1];
+                const active = selectedId === proc.id;
+                const st = PROCESS_STATUS[proc.status || "not-started"];
+                return <tr key={proc.id} style={active ? { background: "var(--blue-l)" } : {}}>
+                  <td onClick={() => setSelectedId(proc.id)} style={{ cursor: "pointer", fontWeight: 600 }}>{proc.title}</td>
+                  <td><span className={`status ${st.cls}`}>{st.label}</span></td>
+                  <td style={{ color: "var(--t2)" }}>{proc.lastReviewed ? fmtDate(proc.lastReviewed) : "-"}</td>
+                  <td><Av m={m} /></td>
+                  <td><button className="btn-ghost" onClick={() => openEdit(proc)}>Edit</button></td>
+                </tr>;
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="sec" style={{ marginBottom: 0 }}>
+        <div className="sec-hdr"><h2>Details</h2></div>
+        {!selected ? <div className="empty" style={{ padding: "30px 16px" }}><p>Select a process to view its steps.</p></div> : <div style={{ padding: "16px 20px" }}>
+          <div style={{ fontSize: 11, color: "var(--t3)", textTransform: "uppercase", fontWeight: 700, letterSpacing: ".05em" }}>Title</div>
+          <div style={{ marginTop: 6, fontSize: 15, fontWeight: 600 }}>{selected.title}</div>
+
+          <div style={{ display: "flex", gap: 10, marginTop: 14, alignItems: "center", flexWrap: "wrap" }}>
+            <span className={`status ${PROCESS_STATUS[selected.status || "not-started"].cls}`}>{PROCESS_STATUS[selected.status || "not-started"].label}</span>
+            <span style={{ fontSize: 12, color: "var(--t2)" }}>Last reviewed: {selected.lastReviewed ? fmtDate(selected.lastReviewed) : "Never"}</span>
+          </div>
+
+          <div style={{ marginTop: 16 }}>
+            <div style={{ fontSize: 11, color: "var(--t3)", textTransform: "uppercase", fontWeight: 700, letterSpacing: ".05em" }}>Steps (one per line)</div>
+            <textarea
+              value={(selected.steps || []).join("\n")}
+              onChange={e => setProcesses(prev => prev.map(p => (p.id === selected.id ? { ...p, steps: parseLines(e.target.value) } : p)))}
+              placeholder={"1. First step\n2. Second step..."}
+              style={{ marginTop: 8, width: "100%", minHeight: 140, border: "1px solid var(--brd)", borderRadius: 8, padding: 10, fontFamily: "inherit", fontSize: 13, resize: "vertical" }}
+            />
+          </div>
+
+          <div style={{ marginTop: 16 }}>
+            <div style={{ fontSize: 11, color: "var(--t3)", textTransform: "uppercase", fontWeight: 700, letterSpacing: ".05em" }}>Notes</div>
+            <textarea
+              value={selected.notes || ""}
+              onChange={e => setProcesses(prev => prev.map(p => (p.id === selected.id ? { ...p, notes: e.target.value } : p)))}
+              placeholder="Tools, exceptions, links to docs..."
+              style={{ marginTop: 8, width: "100%", minHeight: 90, border: "1px solid var(--brd)", borderRadius: 8, padding: 10, fontFamily: "inherit", fontSize: 13, resize: "vertical" }}
+            />
+          </div>
+
+          <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+            <button className="btn" onClick={() => markReviewed(selected.id)}>Mark reviewed today</button>
+            <button className="btn" onClick={() => openEdit(selected)}>Edit metadata</button>
+          </div>
+        </div>}
+      </div>
+    </div></div>
+
+    {modal === "process" && <Modal title={editId ? "Edit process" : "Create process"} onClose={() => setModal(null)}>
+      <div className="modal-body">
+        <div className="field">
+          <label>Process title</label>
+          <input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="e.g., New patient onboarding" autoFocus />
+        </div>
+
+        <div style={{ display: "flex", gap: 12 }}>
+          <div className="field" style={{ flex: 1 }}>
+            <label>Owner</label>
+            <select value={form.owner} onChange={e => setForm({ ...form, owner: e.target.value })}>
+              {team.filter(m => m.id !== "2").map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select>
+          </div>
+          <div className="field" style={{ flex: 1 }}>
+            <label>Status</label>
+            <select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}>
+              <option value="not-started">Not Started</option>
+              <option value="draft">Draft</option>
+              <option value="documented">Documented</option>
+              <option value="fba">FBA</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="field">
+          <label>Steps (one per line)</label>
+          <textarea value={form.steps} onChange={e => setForm({ ...form, steps: e.target.value })} placeholder={"Step one\nStep two\nStep three"} rows={5} />
+        </div>
+
+        <div className="field" style={{ marginBottom: 0 }}>
+          <label>Notes</label>
+          <textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} placeholder="Tools, exceptions, links to docs..." rows={3} />
+        </div>
+      </div>
+
+      <div className="modal-foot" style={{ justifyContent: "space-between" }}>
+        <div>
+          {editId && <button className="btn" style={{ color: "var(--red-t)", borderColor: "var(--red)" }} onClick={() => removeProcess(editId)}><Ic.Trash /> Delete</button>}
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn" onClick={() => setModal(null)}>Cancel</button>
+          <button className="btn btn-p" onClick={saveProcess}>{editId ? "Save" : "Create"}</button>
+        </div>
+      </div>
+    </Modal>}
+  </>;
+}
+
+const MEETING_SECTION_LABELS = [
+  ["segue", "1. Segue"],
+  ["scorecard", "2. Scorecard"],
+  ["rocks", "3. Rocks"],
+  ["customerEmployee", "4. Customer/Employee Headlines"],
+  ["todoReview", "5. To-Do Review"],
+  ["ids", "6. IDS (Identify, Discuss, Solve)"]
+];
+
+function freshMeetingState() {
+  return {
     title: "Weekly Level 10",
     date: new Date().toISOString().slice(0, 10),
-    sections: {
-      segue: "",
-      scorecard: "",
-      rocks: "",
-      customerEmployee: "",
-      todoReview: "",
-      ids: ""
-    },
+    sections: { segue: "", scorecard: "", rocks: "", customerEmployee: "", todoReview: "", ids: "" },
     tangents: [],
     timerSeconds: 0
-  });
+  };
+}
+
+function MeetingsPage({ meetings, setMeetings, issues, todos, team, activeMemberIds }) {
+  const store = meetings && typeof meetings === "object" ? meetings : {};
+  const defaultMeetingRef = useRef(freshMeetingState());
   const mState = store.current || defaultMeetingRef.current;
+  const history = store.history || [];
 
   const [running, setRunning] = useState(false);
   const [tangentText, setTangentText] = useState("");
+  const [tab, setTab] = useState("run");
+  const [modal, setModal] = useState(null);
+  const [rating, setRating] = useState(null);
+  const [selectedHistoryId, setSelectedHistoryId] = useState(null);
 
   useEffect(() => {
     if (!running) return undefined;
@@ -873,27 +1210,56 @@ function MeetingsPage({ meetings, setMeetings, issues, todos, team, activeMember
     setRunning(false);
     setMeetings(prev => {
       const base = prev && typeof prev === "object" ? prev : {};
-      return {
-        ...base,
-        current: {
-          title: "Weekly Level 10",
-          date: new Date().toISOString().slice(0, 10),
-          sections: { segue: "", scorecard: "", rocks: "", customerEmployee: "", todoReview: "", ids: "" },
-          tangents: [],
-          timerSeconds: 0
-        }
-      };
+      return { ...base, current: freshMeetingState() };
     });
   };
 
-  const seconds = mState.timerSeconds || 0;
-  const hh = String(Math.floor(seconds / 3600)).padStart(2, "0");
-  const mm = String(Math.floor((seconds % 3600) / 60)).padStart(2, "0");
-  const ss = String(seconds % 60).padStart(2, "0");
+  const openEndMeeting = () => {
+    setRating(null);
+    setModal("end");
+  };
+
+  const confirmEndMeeting = () => {
+    if (!rating) return;
+    setRunning(false);
+    setMeetings(prev => {
+      const base = prev && typeof prev === "object" ? prev : {};
+      const cur = base.current || mState;
+      const archived = {
+        id: uid(),
+        title: cur.title || "Weekly Level 10",
+        date: cur.date || new Date().toISOString().slice(0, 10),
+        sections: cur.sections || {},
+        tangents: cur.tangents || [],
+        durationSeconds: cur.timerSeconds || 0,
+        rating,
+        endedAt: new Date().toISOString()
+      };
+      return { ...base, history: [archived, ...(base.history || [])], current: freshMeetingState() };
+    });
+    setModal(null);
+  };
+
+  const removeHistoryMeeting = id => {
+    setMeetings(prev => {
+      const base = prev && typeof prev === "object" ? prev : {};
+      return { ...base, history: (base.history || []).filter(h => h.id !== id) };
+    });
+    if (selectedHistoryId === id) setSelectedHistoryId(null);
+  };
+
+  const fmtDuration = s => {
+    const sec = s || 0;
+    const hh = String(Math.floor(sec / 3600)).padStart(2, "0");
+    const mm = String(Math.floor((sec % 3600) / 60)).padStart(2, "0");
+    const ss = String(sec % 60).padStart(2, "0");
+    return `${hh}:${mm}:${ss}`;
+  };
 
   const openIssues = issues.filter(i => !i.done && activeMemberIds.includes(i.owner));
   const openTodos = todos.filter(t => !t.done && activeMemberIds.includes(t.owner));
   const tangents = mState.tangents || [];
+  const selectedHistory = history.find(h => h.id === selectedHistoryId) || null;
 
   return <>
     <div className="phdr">
@@ -902,15 +1268,20 @@ function MeetingsPage({ meetings, setMeetings, issues, todos, team, activeMember
           <h1>Meetings</h1>
           <div className="phdr-desc">Run your Level 10 meeting with structured sections, timer, IDS notes, and tangents.</div>
         </div>
-        <div className="phdr-actions" style={{ gap: 10 }}>
-          <div style={{ fontSize: 20, fontWeight: 700, letterSpacing: ".03em", minWidth: 110, textAlign: "right" }}>{hh}:{mm}:{ss}</div>
+        {tab === "run" && <div className="phdr-actions" style={{ gap: 10 }}>
+          <div style={{ fontSize: 20, fontWeight: 700, letterSpacing: ".03em", minWidth: 110, textAlign: "right" }}>{fmtDuration(mState.timerSeconds || 0)}</div>
           <button className="btn" onClick={() => setRunning(r => !r)}>{running ? "Pause" : "Start"}</button>
           <button className="btn" onClick={clearMeeting}>Reset</button>
-        </div>
+          <button className="btn btn-p" onClick={openEndMeeting}>End meeting</button>
+        </div>}
+      </div>
+      <div className="tabs">
+        <div className={`tab${tab === "run" ? " on" : ""}`} onClick={() => setTab("run")}>Run Meeting</div>
+        <div className={`tab${tab === "history" ? " on" : ""}`} onClick={() => setTab("history")}>History</div>
       </div>
     </div>
 
-    <div className="content"><div className="content-inner" style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 16 }}>
+    {tab === "run" && <div className="content"><div className="content-inner" style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 16 }}>
       <div>
         <div className="sec">
           <div className="sec-hdr"><h2>Meeting Setup</h2></div>
@@ -1003,7 +1374,84 @@ function MeetingsPage({ meetings, setMeetings, issues, todos, team, activeMember
           </div>
         </div>
       </div>
-    </div></div>
+    </div></div>}
+
+    {tab === "history" && <div className="content"><div className="content-inner" style={{ display: "grid", gridTemplateColumns: "1fr minmax(280px, 380px)", gap: 16 }}>
+      <div className="sec" style={{ marginBottom: 0 }}>
+        <div className="sec-hdr"><h2>Past Meetings<span className="count">{history.length}</span></h2></div>
+        {history.length === 0 ? <div className="empty"><h3>No meeting history yet</h3><p>End a meeting to save it here with a rating.</p></div> : (
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Title</th>
+                <th style={{ width: 90 }}>Duration</th>
+                <th style={{ width: 90 }}>Rating</th>
+                <th style={{ width: 70 }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {history.map(h => {
+                const active = selectedHistoryId === h.id;
+                const ratingCls = h.rating >= 8 ? "status-on" : h.rating >= 5 ? "status-warn" : "status-off";
+                return <tr key={h.id} style={active ? { background: "var(--blue-l)" } : {}}>
+                  <td onClick={() => setSelectedHistoryId(h.id)} style={{ cursor: "pointer" }}>{fmtDate(h.date)}</td>
+                  <td onClick={() => setSelectedHistoryId(h.id)} style={{ cursor: "pointer", fontWeight: 600 }}>{h.title}</td>
+                  <td style={{ color: "var(--t2)" }}>{fmtDuration(h.durationSeconds)}</td>
+                  <td><span className={`status ${ratingCls}`}>{h.rating}/10</span></td>
+                  <td><button className="btn-ghost" onClick={() => removeHistoryMeeting(h.id)}>Delete</button></td>
+                </tr>;
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="sec" style={{ marginBottom: 0 }}>
+        <div className="sec-hdr"><h2>Details</h2></div>
+        {!selectedHistory ? <div className="empty" style={{ padding: "30px 16px" }}><p>Select a meeting to view its notes.</p></div> : <div style={{ padding: "16px 20px" }}>
+          <div style={{ fontSize: 11, color: "var(--t3)", textTransform: "uppercase", fontWeight: 700, letterSpacing: ".05em" }}>Meeting</div>
+          <div style={{ marginTop: 6, fontSize: 15, fontWeight: 600 }}>{selectedHistory.title}</div>
+
+          <div style={{ display: "flex", gap: 10, marginTop: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <span style={{ fontSize: 12, color: "var(--t2)" }}>{fmtDate(selectedHistory.date)}</span>
+            <span style={{ fontSize: 12, color: "var(--t2)" }}>Duration: {fmtDuration(selectedHistory.durationSeconds)}</span>
+            <span className={`status ${selectedHistory.rating >= 8 ? "status-on" : selectedHistory.rating >= 5 ? "status-warn" : "status-off"}`}>{selectedHistory.rating}/10</span>
+          </div>
+
+          {MEETING_SECTION_LABELS.map(([key, label]) => selectedHistory.sections?.[key] ? (
+            <div key={key} style={{ marginTop: 14 }}>
+              <div style={{ fontSize: 11, color: "var(--t3)", textTransform: "uppercase", fontWeight: 700, letterSpacing: ".05em" }}>{label}</div>
+              <div style={{ marginTop: 6, fontSize: 13, color: "var(--t1)", whiteSpace: "pre-wrap" }}>{selectedHistory.sections[key]}</div>
+            </div>
+          ) : null)}
+
+          {(selectedHistory.tangents || []).length > 0 && <div style={{ marginTop: 14 }}>
+            <div style={{ fontSize: 11, color: "var(--t3)", textTransform: "uppercase", fontWeight: 700, letterSpacing: ".05em" }}>Tangents</div>
+            <ul style={{ marginTop: 6, paddingLeft: 18, fontSize: 13 }}>
+              {selectedHistory.tangents.map(tg => <li key={tg.id}>{tg.title}</li>)}
+            </ul>
+          </div>}
+        </div>}
+      </div>
+    </div></div>}
+
+    {modal === "end" && <Modal title="End meeting" onClose={() => setModal(null)}>
+      <div className="modal-body">
+        <div className="field" style={{ marginBottom: 0 }}>
+          <label>Rate this meeting (1-10)</label>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+            {Array.from({ length: 10 }, (_, i) => i + 1).map(n => (
+              <button key={n} type="button" className={`btn btn-sm${rating === n ? " btn-p" : ""}`} onClick={() => setRating(n)}>{n}</button>
+            ))}
+          </div>
+        </div>
+      </div>
+      <div className="modal-foot">
+        <button className="btn" onClick={() => setModal(null)}>Cancel</button>
+        <button className="btn btn-p" onClick={confirmEndMeeting} disabled={!rating}>Save & end meeting</button>
+      </div>
+    </Modal>}
   </>;
 }
 function HeadlinesPage({ headlines, setHeadlines, team, activeMemberIds }) {
@@ -1143,25 +1591,166 @@ function VisionPage({ vision, setVision }) {
   </>;
 }
 
-function OrgChartPage({ teams, team }) {
-  return <>
-    <div className="phdr"><div className="phdr-top"><div><h1>Org Chart</h1><div className="phdr-desc">Visualize roles and accountability by team.</div></div></div></div>
-    <div className="content"><div className="content-inner">
-      <div className="sec">
-        <div className="sec-hdr"><h2>Reporting Structure</h2></div>
-        <div className="org-wrap">
-          {teams.map(t => {
-            const members = team.filter(m => t.memberIds.includes(m.id));
-            return <div key={t.id} style={{ width: "100%", marginBottom: 26 }}>
-              <div style={{ textAlign: "center", marginBottom: 12, fontSize: 14, fontWeight: 700 }}>{t.name}</div>
-              <div className="org-level">
-                {members.length === 0 ? <div style={{ color: "var(--t3)", fontSize: 13 }}>No team members assigned</div> : members.map(m => <div key={m.id} className="org-card"><div style={{ fontWeight: 700, fontSize: 14 }}>{m.name}</div><div style={{ color: "var(--t2)", marginTop: 4, fontSize: 12 }}>{m.role || "No role"}</div></div>)}
-              </div>
-            </div>;
-          })}
+function AccountabilityChartPage({ seats, setSeats, team, vision, peopleAnalyzer, setPeopleAnalyzer }) {
+  const [tab, setTab] = useState("chart");
+  const [modal, setModal] = useState(null);
+  const [editId, setEditId] = useState(null);
+  const [form, setForm] = useState({ title: "", responsibilities: "", memberId: "", parentId: null });
+  const [quarter, setQuarter] = useState(currentQuarterLabel());
+  const [selectedMemberId, setSelectedMemberId] = useState(null);
+
+  const members = team.filter(m => m.id !== "2");
+
+  const openAddSeat = (parentId = null) => {
+    setEditId(null);
+    setForm({ title: "", responsibilities: "", memberId: "", parentId });
+    setModal("seat");
+  };
+
+  const openEditSeat = seat => {
+    setEditId(seat.id);
+    setForm({
+      title: seat.title || "",
+      responsibilities: (seat.responsibilities || []).join("\n"),
+      memberId: seat.memberId || "",
+      parentId: seat.parentId || null
+    });
+    setModal("seat");
+  };
+
+  const saveSeat = () => {
+    const title = form.title.trim();
+    if (!title) return;
+    const payload = { title, responsibilities: parseLines(form.responsibilities), memberId: form.memberId || null, parentId: form.parentId || null };
+    if (editId) {
+      setSeats(prev => prev.map(s => (s.id === editId ? { ...s, ...payload } : s)));
+    } else {
+      setSeats(prev => [...prev, { id: uid(), ...payload }]);
+    }
+    setModal(null);
+  };
+
+  const removeSeat = id => {
+    setSeats(prev => {
+      const seat = prev.find(s => s.id === id);
+      const reparented = prev.map(s => (s.parentId === id ? { ...s, parentId: seat?.parentId || null } : s));
+      return reparented.filter(s => s.id !== id);
+    });
+    setModal(null);
+  };
+
+  const childrenOf = parentId => seats.filter(s => s.parentId === parentId);
+  const topSeats = childrenOf(null);
+
+  const SeatNode = ({ seat }) => {
+    const m = team.find(x => x.id === seat.memberId);
+    const kids = childrenOf(seat.id);
+    return <div className="acc-branch">
+      <div className="seat-card">
+        <div className="seat-title">{seat.title}</div>
+        <div className="seat-person">{m ? <><Av m={m} size={18} />{m.name}</> : <span style={{ color: "var(--t3)" }}>Unassigned</span>}</div>
+        {!!(seat.responsibilities || []).length && <ul className="seat-resp">{seat.responsibilities.map((r, i) => <li key={i}>{r}</li>)}</ul>}
+        <div className="seat-actions">
+          <button className="btn-ghost" style={{ fontSize: 11 }} onClick={() => openEditSeat(seat)}>Edit</button>
+          <button className="btn-ghost" style={{ fontSize: 11 }} onClick={() => openAddSeat(seat.id)}>+ Report</button>
         </div>
       </div>
-    </div></div>
+      {kids.length > 0 && <div className="acc-children">{kids.map(k => <SeatNode key={k.id} seat={k} />)}</div>}
+    </div>;
+  };
+
+  const coreValues = parseLines(vision.coreValues);
+  const quarterData = peopleAnalyzer[quarter] || {};
+  const getEntry = memberId => quarterData[memberId] || { gwc: {}, values: {}, notes: "" };
+
+  const updateEntry = (memberId, updater) => {
+    setPeopleAnalyzer(prev => {
+      const qData = prev[quarter] || {};
+      const cur = qData[memberId] || { gwc: {}, values: {}, notes: "" };
+      return { ...prev, [quarter]: { ...qData, [memberId]: updater(cur) } };
+    });
+  };
+
+  const toggleGwc = (memberId, key) => updateEntry(memberId, cur => ({ ...cur, gwc: { ...cur.gwc, [key]: !cur.gwc[key] } }));
+
+  const cycleRating = (memberId, value) => updateEntry(memberId, cur => {
+    const order = ["", "+", "+/-", "-"];
+    const idx = order.indexOf(cur.values[value] || "");
+    return { ...cur, values: { ...cur.values, [value]: order[(idx + 1) % order.length] } };
+  });
+
+  const setNotes = (memberId, text) => updateEntry(memberId, cur => ({ ...cur, notes: text }));
+
+  return <>
+    <div className="phdr">
+      <div className="phdr-top">
+        <div>
+          <h1>Accountability Chart</h1>
+          <div className="phdr-desc">Define seats, roles, and reporting lines — and run quarterly People Analyzer conversations.</div>
+        </div>
+        {tab === "chart" && <div className="phdr-actions"><button className="btn btn-p" onClick={() => openAddSeat(null)}><Ic.Plus /> Add seat</button></div>}
+      </div>
+      <div className="tabs">
+        <div className={`tab${tab === "chart" ? " on" : ""}`} onClick={() => setTab("chart")}>Chart</div>
+        <div className={`tab${tab === "analyzer" ? " on" : ""}`} onClick={() => setTab("analyzer")}>People Analyzer</div>
+      </div>
+    </div>
+
+    {tab === "chart" ? <div className="content"><div className="content-inner">
+      <div className="sec" style={{ overflow: "visible" }}>
+        <div className="sec-hdr"><h2>Seats<span className="count">{seats.length}</span></h2></div>
+        {topSeats.length === 0 ? <div className="empty"><h3>No seats defined</h3><p>Add your first seat to start building the chart.</p></div> : <div className="acc-wrap"><div className="acc-row">{topSeats.map(s => <SeatNode key={s.id} seat={s} />)}</div></div>}
+      </div>
+    </div></div> : <div className="content"><div className="content-inner" style={{ display: "grid", gridTemplateColumns: "1fr minmax(260px, 320px)", gap: 16 }}>
+      <div className="sec" style={{ marginBottom: 0 }}>
+        <div className="sec-hdr">
+          <h2>People Analyzer</h2>
+          <input value={quarter} onChange={e => setQuarter(e.target.value)} style={{ width: 110, padding: "5px 10px", border: "1px solid var(--brd)", borderRadius: 8, fontSize: 12, fontFamily: "inherit" }} />
+        </div>
+        {coreValues.length === 0 ? <div className="empty"><p>Add core values on the Vision page (one per line) to enable People Analyzer ratings.</p></div> : <div className="pa-grid">
+          <table className="pa-tbl">
+            <thead><tr><th style={{ textAlign: "left" }}>Name</th><th>GWC</th>{coreValues.map(v => <th key={v}>{v}</th>)}</tr></thead>
+            <tbody>
+              {members.map(m => {
+                const entry = getEntry(m.id);
+                const active = selectedMemberId === m.id;
+                return <tr key={m.id} className={active ? "on" : ""}>
+                  <td className="pa-name" onClick={() => setSelectedMemberId(m.id)}>{m.name}</td>
+                  <td><div className="pa-gwc">
+                    {["get", "want", "capacity"].map(k => <div key={k} className={`pa-gwc-dot${entry.gwc[k] ? " on" : ""}`} title={k} onClick={() => toggleGwc(m.id, k)}>{k[0].toUpperCase()}</div>)}
+                  </div></td>
+                  {coreValues.map(v => <td key={v}><button className="pa-rating" onClick={() => cycleRating(m.id, v)}>{entry.values[v] || "–"}</button></td>)}
+                </tr>;
+              })}
+            </tbody>
+          </table>
+        </div>}
+      </div>
+
+      <div className="sec" style={{ marginBottom: 0 }}>
+        <div className="sec-hdr"><h2>Notes</h2></div>
+        {!selectedMemberId ? <div className="empty" style={{ padding: "30px 16px" }}><p>Select a person to add quarterly conversation notes.</p></div> : <div style={{ padding: 16 }}>
+          <textarea
+            value={getEntry(selectedMemberId).notes || ""}
+            onChange={e => setNotes(selectedMemberId, e.target.value)}
+            placeholder="Document the quarterly conversation..."
+            style={{ width: "100%", minHeight: 220, border: "1px solid var(--brd)", borderRadius: 8, padding: 10, fontFamily: "inherit", fontSize: 13, resize: "vertical" }}
+          />
+        </div>}
+      </div>
+    </div></div>}
+
+    {modal === "seat" && <Modal title={editId ? "Edit seat" : "Add seat"} onClose={() => setModal(null)}>
+      <div className="modal-body">
+        <div className="field"><label>Seat title</label><input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="e.g., Sales Leader" autoFocus /></div>
+        <div className="field"><label>Assigned person</label><select value={form.memberId} onChange={e => setForm({ ...form, memberId: e.target.value })}><option value="">Unassigned</option>{members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select></div>
+        <div className="field" style={{ marginBottom: 0 }}><label>Responsibilities (one per line)</label><textarea rows={5} value={form.responsibilities} onChange={e => setForm({ ...form, responsibilities: e.target.value })} placeholder={"Owns X\nDrives Y\nManages Z"} /></div>
+      </div>
+      <div className="modal-foot" style={{ justifyContent: "space-between" }}>
+        <div>{editId && <button className="btn" style={{ color: "var(--red-t)", borderColor: "var(--red)" }} onClick={() => removeSeat(editId)}><Ic.Trash /> Delete</button>}</div>
+        <div style={{ display: "flex", gap: 8 }}><button className="btn" onClick={() => setModal(null)}>Cancel</button><button className="btn btn-p" onClick={saveSeat}>{editId ? "Save" : "Create"}</button></div>
+      </div>
+    </Modal>}
   </>;
 }
 
@@ -1271,7 +1860,7 @@ function TeamPage({ team, setTeam, teams, setTeams }) {
   </>;
 }
 
-function ProfilePage({ profile, setProfile }) {
+function ProfilePage({ profile, setProfile, onExportBackup, onImportBackup }) {
   const initials = `${(profile.firstName || "").slice(0, 1)}${(profile.lastName || "").slice(0, 1)}`.toUpperCase() || "U";
 
   const setField = (k, v) => setProfile(prev => ({ ...prev, [k]: v }));
@@ -1295,25 +1884,41 @@ function ProfilePage({ profile, setProfile }) {
           <div style={{ padding: "14px 16px", fontSize: 12, color: "var(--t2)" }}>Use a square image for best results.</div>
         </div>
 
-        <div className="profile-card">
-          <div className="profile-section-title">Identity</div>
-          <div style={{ padding: "16px 20px" }}>
-            <div style={{ display: "flex", gap: 12 }}>
-              <div className="field" style={{ flex: 1 }}><label>First name</label><input value={profile.firstName || ""} onChange={e => setField("firstName", e.target.value)} /></div>
-              <div className="field" style={{ flex: 1 }}><label>Last name</label><input value={profile.lastName || ""} onChange={e => setField("lastName", e.target.value)} /></div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+          <div className="profile-card">
+            <div className="profile-section-title">Identity</div>
+            <div style={{ padding: "16px 20px" }}>
+              <div style={{ display: "flex", gap: 12 }}>
+                <div className="field" style={{ flex: 1 }}><label>First name</label><input value={profile.firstName || ""} onChange={e => setField("firstName", e.target.value)} /></div>
+                <div className="field" style={{ flex: 1 }}><label>Last name</label><input value={profile.lastName || ""} onChange={e => setField("lastName", e.target.value)} /></div>
+              </div>
+              <div className="field"><label>Title</label><input value={profile.title || ""} onChange={e => setField("title", e.target.value)} /></div>
+              <div className="field" style={{ marginBottom: 0 }}><label>Bio</label><textarea rows={6} value={profile.bio || ""} onChange={e => setField("bio", e.target.value)} placeholder="Share your background and responsibilities" /></div>
             </div>
-            <div className="field"><label>Title</label><input value={profile.title || ""} onChange={e => setField("title", e.target.value)} /></div>
-            <div className="field" style={{ marginBottom: 0 }}><label>Bio</label><textarea rows={6} value={profile.bio || ""} onChange={e => setField("bio", e.target.value)} placeholder="Share your background and responsibilities" /></div>
+            <div className="profile-section-title">Address</div>
+            <div style={{ padding: "16px 20px" }}>
+              <div className="field"><label>Street</label><input value={profile.street || ""} onChange={e => setField("street", e.target.value)} /></div>
+              <div style={{ display: "flex", gap: 12 }}>
+                <div className="field" style={{ flex: 2 }}><label>City</label><input value={profile.city || ""} onChange={e => setField("city", e.target.value)} /></div>
+                <div className="field" style={{ flex: 1 }}><label>State</label><input value={profile.state || ""} onChange={e => setField("state", e.target.value)} /></div>
+                <div className="field" style={{ flex: 1 }}><label>Zip</label><input value={profile.zip || ""} onChange={e => setField("zip", e.target.value)} /></div>
+              </div>
+              <div className="field" style={{ marginBottom: 0 }}><label>Country</label><input value={profile.country || ""} onChange={e => setField("country", e.target.value)} /></div>
+            </div>
           </div>
-          <div className="profile-section-title">Address</div>
-          <div style={{ padding: "16px 20px" }}>
-            <div className="field"><label>Street</label><input value={profile.street || ""} onChange={e => setField("street", e.target.value)} /></div>
-            <div style={{ display: "flex", gap: 12 }}>
-              <div className="field" style={{ flex: 2 }}><label>City</label><input value={profile.city || ""} onChange={e => setField("city", e.target.value)} /></div>
-              <div className="field" style={{ flex: 1 }}><label>State</label><input value={profile.state || ""} onChange={e => setField("state", e.target.value)} /></div>
-              <div className="field" style={{ flex: 1 }}><label>Zip</label><input value={profile.zip || ""} onChange={e => setField("zip", e.target.value)} /></div>
+
+          <div className="profile-card">
+            <div className="profile-section-title">Data Backup</div>
+            <div style={{ padding: "16px 20px" }}>
+              <div style={{ fontSize: 13, color: "var(--t2)", marginBottom: 12 }}>Export a full backup of your data, or restore from a previous backup file. Restoring replaces all data currently stored in this browser.</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="btn" onClick={onExportBackup}>Export backup (JSON)</button>
+                <label className="btn" style={{ cursor: "pointer" }}>
+                  Import backup
+                  <input type="file" accept="application/json" style={{ display: "none" }} onChange={e => { const f = e.target.files?.[0]; if (f) onImportBackup(f); e.target.value = ""; }} />
+                </label>
+              </div>
             </div>
-            <div className="field" style={{ marginBottom: 0 }}><label>Country</label><input value={profile.country || ""} onChange={e => setField("country", e.target.value)} /></div>
           </div>
         </div>
       </div>
@@ -1322,7 +1927,7 @@ function ProfilePage({ profile, setProfile }) {
 }
 
 // MAIN APP
-export default function App() {
+export default function App({ orgName }) {
   const [page, setPage] = useState("dashboard");
   const [todos, setTodos] = useState([]);
   const [scorecard, setScorecard] = useState([]);
@@ -1335,6 +1940,9 @@ export default function App() {
   const [rocks, setRocks] = useState([]);
   const [headlines, setHeadlines] = useState([]);
   const [vision, setVision] = useState(VISION_DEFAULT);
+  const [seats, setSeats] = useState(SEATS_DEFAULT);
+  const [peopleAnalyzer, setPeopleAnalyzer] = useState(PEOPLE_ANALYZER_DEFAULT);
+  const [processes, setProcesses] = useState([]);
   const [loaded, setLoaded] = useState(false);
   const [sbCollapsed, setSbCollapsed] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
@@ -1343,7 +1951,7 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
-      const [t, s, sd, m, i, tm, r, h, v, tms, pr] = await Promise.all([
+      const [t, s, sd, m, i, tm, r, h, v, tms, pr, st, pa, pc] = await Promise.all([
         load(STORAGE_KEYS.todos, []),
         load(STORAGE_KEYS.scorecard, SC_DEFAULT),
         load(STORAGE_KEYS.scData, {}),
@@ -1355,8 +1963,11 @@ export default function App() {
         load(STORAGE_KEYS.vision, VISION_DEFAULT),
         load(STORAGE_KEYS.teams, TEAMS_DEFAULT),
         load(STORAGE_KEYS.profile, PROFILE_DEFAULT),
+        load(STORAGE_KEYS.seats, SEATS_DEFAULT),
+        load(STORAGE_KEYS.peopleAnalyzer, PEOPLE_ANALYZER_DEFAULT),
+        load(STORAGE_KEYS.processes, []),
       ]);
-      setTodos(t); setScorecard(s); setScData(sd); setMeetings(m); setIssues(i); setTeam(tm); setRocks(r); setHeadlines(h); setVision(v); setTeams(tms); setProfile(pr);
+      setTodos(t); setScorecard(s); setScData(sd); setMeetings(m); setIssues(i); setTeam(tm); setRocks(r); setHeadlines(h); setVision(v); setTeams(tms); setProfile(pr); setSeats(st); setPeopleAnalyzer(pa); setProcesses(pc);
       setLoaded(true);
     })();
   }, []);
@@ -1372,6 +1983,54 @@ export default function App() {
   useEffect(() => { if (loaded) save(STORAGE_KEYS.vision, vision); }, [vision, loaded]);
   useEffect(() => { if (loaded) save(STORAGE_KEYS.teams, teams); }, [teams, loaded]);
   useEffect(() => { if (loaded) save(STORAGE_KEYS.profile, profile); }, [profile, loaded]);
+  useEffect(() => { if (loaded) save(STORAGE_KEYS.seats, seats); }, [seats, loaded]);
+  useEffect(() => { if (loaded) save(STORAGE_KEYS.peopleAnalyzer, peopleAnalyzer); }, [peopleAnalyzer, loaded]);
+  useEffect(() => { if (loaded) save(STORAGE_KEYS.processes, processes); }, [processes, loaded]);
+
+  const exportBackup = () => {
+    const payload = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      data: { todos, scorecard, scData, meetings, issues, team, teams, rocks, headlines, vision, profile, seats, peopleAnalyzer, processes }
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `eos-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importBackup = file => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      let data;
+      try {
+        const parsed = JSON.parse(String(reader.result));
+        data = parsed.data || parsed;
+      } catch {
+        window.alert("Could not read backup file. Make sure it's a valid export from this app.");
+        return;
+      }
+      if (!window.confirm("This will replace all data currently stored in this browser with the contents of the backup file. Continue?")) return;
+      setTodos(data.todos || []);
+      setScorecard(data.scorecard || SC_DEFAULT);
+      setScData(data.scData || {});
+      setMeetings(data.meetings || {});
+      setIssues(data.issues || []);
+      setTeam(data.team || TEAM_DEFAULT);
+      setTeams(data.teams || TEAMS_DEFAULT);
+      setRocks(data.rocks || []);
+      setHeadlines(data.headlines || []);
+      setVision(data.vision || VISION_DEFAULT);
+      setProfile(data.profile || PROFILE_DEFAULT);
+      setSeats(data.seats || SEATS_DEFAULT);
+      setPeopleAnalyzer(data.peopleAnalyzer || PEOPLE_ANALYZER_DEFAULT);
+      setProcesses(data.processes || []);
+    };
+    reader.readAsText(file);
+  };
 
   if (!loaded) return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: "#F8F9FA", color: "#9CA3AF" }}><style>{CSS}</style>Loading...</div>;
 
@@ -1385,18 +2044,19 @@ export default function App() {
     { id: "rocks", label: "Rocks", icon: <Ic.Rocks /> },
     { id: "todos", label: "To-Dos", icon: <Ic.Todos /> },
     { id: "issues", label: "Issues", icon: <Ic.Issues /> },
+    { id: "processes", label: "Processes", icon: <Ic.Process /> },
     { id: "meetings", label: "Meetings", icon: <Ic.Meetings /> },
     { id: "headlines", label: "Headlines", icon: <Ic.Headlines /> },
   ];
-  const navExtra = [{ id: "vision", label: "Vision / V/TO", icon: <Ic.Vision /> }, { id: "org", label: "Org Chart", icon: <Ic.OrgChart /> }, { id: "team", label: "Team", icon: <Ic.Team /> }];
+  const navExtra = [{ id: "vision", label: "Vision / V/TO", icon: <Ic.Vision /> }, { id: "accountability", label: "Accountability Chart", icon: <Ic.OrgChart /> }, { id: "team", label: "Team", icon: <Ic.Team /> }];
   const sbW = sbCollapsed ? 56 : 228;
 
   return <div className="shell">
     <style>{CSS}</style>
     {!mob && <nav className="sb" style={{ width: sbW, minWidth: sbW }}>
       <div className="sb-head">
-        {!sbCollapsed && <><div className="sb-logo">T</div><div className="sb-co">TMJ Sleep<small>NW</small></div></> }
-        {sbCollapsed && <div className="sb-logo" style={{ margin: "0 auto" }}>T</div>}
+        {!sbCollapsed && <><div className="sb-logo">{(orgName || "?")[0].toUpperCase()}</div><div className="sb-co">{orgName}</div></> }
+        {sbCollapsed && <div className="sb-logo" style={{ margin: "0 auto" }}>{(orgName || "?")[0].toUpperCase()}</div>}
         {!sbCollapsed && <button className="sb-toggle-btn" onClick={() => setSbCollapsed(true)}><Ic.Chevron dir="left" /></button>}
       </div>
       {!sbCollapsed && <div className="sb-team-picker"><select value={activeTeamId} onChange={e => setActiveTeamId(e.target.value)}><option value="all">All Teams</option>{teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select><span className="sb-team-picker-icon"><Ic.Down /></span></div>}
@@ -1418,16 +2078,17 @@ export default function App() {
         </button>
       </div>
       {page === "dashboard" && <DashboardPage {...{ todos, setTodos, rocks, issues, scorecard, scData, team, activeMemberIds, setPage }} />}
-      {page === "todos" && <TodosPage {...{ todos, setTodos, team, activeMemberIds }} />}
+      {page === "todos" && <TodosPage {...{ todos, setTodos, team, activeMemberIds, rocks }} />}
       {page === "scorecard" && <ScorecardPage {...{ scorecard, setScorecard, scData, setScData, team, activeMemberIds, mob }} />}
-      {page === "rocks" && <RocksPage {...{ rocks, setRocks, team, activeMemberIds }} />}
-      {page === "issues" && <IssuesPage {...{ issues, setIssues, team, activeMemberIds }} />}
+      {page === "rocks" && <RocksPage {...{ rocks, setRocks, team, activeMemberIds, issues, todos }} />}
+      {page === "issues" && <IssuesPage {...{ issues, setIssues, team, activeMemberIds, rocks, todos, setTodos }} />}
+      {page === "processes" && <ProcessesPage {...{ processes, setProcesses, team, activeMemberIds }} />}
       {page === "meetings" && <MeetingsPage {...{ meetings, setMeetings, issues, todos, team, activeMemberIds }} />}
       {page === "headlines" && <HeadlinesPage {...{ headlines, setHeadlines, team, activeMemberIds }} />}
       {page === "vision" && <VisionPage {...{ vision, setVision }} />}
-      {page === "org" && <OrgChartPage {...{ teams, team }} />}
+      {page === "accountability" && <AccountabilityChartPage {...{ seats, setSeats, team, vision, peopleAnalyzer, setPeopleAnalyzer }} />}
       {page === "team" && <TeamPage {...{ team, setTeam, teams, setTeams }} />}
-      {page === "profile" && <ProfilePage {...{ profile, setProfile }} />}
+      {page === "profile" && <ProfilePage {...{ profile, setProfile, onExportBackup: exportBackup, onImportBackup: importBackup }} />}
     </div>
     {mob && <div className="bnav">
       {navMain.slice(0, 5).map(n => (<div key={n.id} className={`bnav-i${page === n.id ? " on" : ""}`} onClick={() => setPage(n.id)}>{n.icon}<span>{n.label}</span>{n.id === "todos" && activeTodos > 0 && <span className="bbdg">{activeTodos}</span>}{n.id === "issues" && openIssues > 0 && <span className="bbdg">{openIssues}</span>}</div>))}

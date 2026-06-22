@@ -110,6 +110,29 @@ export function scaleGoal(metric, tab) {
   return Math.round(metric.goal * (PERIOD_WEEKS[tab] || 1));
 }
 
+// Split textarea content into a trimmed, non-empty list of lines
+export function parseLines(text) {
+  return String(text || "")
+    .split("\n")
+    .map(line => line.trim())
+    .filter(Boolean);
+}
+
+// Completion progress for a rock's milestones
+export function milestoneProgress(milestones) {
+  const list = Array.isArray(milestones) ? milestones : [];
+  return { done: list.filter(m => m.done).length, total: list.length };
+}
+
+// Current quarter label, e.g. "Q1 2026"
+export function currentQuarterLabel(offset = 0) {
+  const now = new Date();
+  const totalQ = now.getFullYear() * 4 + Math.floor(now.getMonth() / 3) + offset;
+  const yr = Math.floor(totalQ / 4);
+  const qn = ((totalQ % 4) + 4) % 4;
+  return `Q${qn + 1} ${yr}`;
+}
+
 // Format date
 export function fmtDate(s) {
   if (!s) return "";
