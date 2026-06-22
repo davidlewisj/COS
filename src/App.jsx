@@ -2173,6 +2173,26 @@ export default function App({ orgName }) {
   useEffect(() => { if (loaded) save(STORAGE_KEYS.peopleAnalyzer, peopleAnalyzer); }, [peopleAnalyzer, loaded]);
   useEffect(() => { if (loaded) save(STORAGE_KEYS.processes, processes); }, [processes, loaded]);
 
+  // Derive logged-in user's team ID from profile name; fall back to first real member
+  const myId = (() => {
+    const fullName = `${profile.firstName} ${profile.lastName}`.trim();
+    if (fullName) { const found = team.find(m => m.name === fullName); if (found) return found.id; }
+    return team.find(m => m.id !== "2")?.id || "1";
+  })();
+
+  // Keep the logged-in user's team record in sync with their profile photo,
+  // so every assignee avatar (Rocks, To-Dos, Issues, Scorecard, Accountability Chart, etc.) reflects it.
+  useEffect(() => {
+    if (!loaded || !myId) return;
+    setTeam(prev => {
+      const idx = prev.findIndex(m => m.id === myId);
+      if (idx === -1 || prev[idx].avatar === profile.avatar) return prev;
+      const next = [...prev];
+      next[idx] = { ...next[idx], avatar: profile.avatar };
+      return next;
+    });
+  }, [profile.avatar, myId, loaded]);
+
   const exportBackup = () => {
     const payload = {
       version: 1,
@@ -2259,7 +2279,7 @@ export default function App({ orgName }) {
           <Ic.Bell />{activeTodos + openIssues > 0 && <span style={{ position: "absolute", top: 1, right: 1, background: "var(--red)", color: "#fff", borderRadius: 10, fontSize: 9, fontWeight: 700, padding: "1px 4px", minWidth: 14, textAlign: "center", lineHeight: "14px" }}>{activeTodos + openIssues}</span>}
         </button>
         <button onClick={() => setPage("profile")} style={{ display: "flex", alignItems: "center", gap: 7, padding: "4px 10px 4px 6px", border: "1px solid var(--brd)", borderRadius: 20, background: page === "profile" ? "var(--blue-l)" : "var(--white)", cursor: "pointer", transition: "all .12s", color: page === "profile" ? "var(--blue)" : "var(--t2)" }}>
-          <div style={{ width: 24, height: 24, borderRadius: "50%", background: "#4A90D9", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700, color: "#fff" }}>{`${profile.firstName?.[0] || ""}${profile.lastName?.[0] || ""}`.toUpperCase()}</div>
+          <Av m={{ name: `${profile.firstName || "?"} ${profile.lastName || ""}`.trim(), avatar: profile.avatar, color: "#4A90D9" }} size={24} />
           <span style={{ fontSize: 12, fontWeight: 600 }}>{profile.firstName}</span>
         </button>
       </div>

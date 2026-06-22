@@ -7,6 +7,14 @@ describe("Av", () => {
     render(<Av m={{ name: "Jane Doe" }} />);
     expect(screen.getByText("JD")).toBeInTheDocument();
   });
+
+  it("renders the avatar photo instead of initials when present", () => {
+    render(<Av m={{ name: "Jane Doe", avatar: "data:image/png;base64,abc123" }} />);
+    expect(screen.queryByText("JD")).not.toBeInTheDocument();
+    const img = screen.getByAltText("Jane Doe");
+    expect(img).toBeInTheDocument();
+    expect(img).toHaveAttribute("src", "data:image/png;base64,abc123");
+  });
 });
 
 describe("CircleCk", () => {

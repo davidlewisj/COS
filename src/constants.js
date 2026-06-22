@@ -31,8 +31,8 @@ export const PROFILE_DEFAULT = {
 };
 
 export const TEAM_DEFAULT = [
-  { id: "1", name: "David Lewis", role: "Operations", color: "#4A90D9" },
-  { id: "2", name: "Unassigned", role: "", color: "#CBD5E1" }
+  { id: "1", name: "David Lewis", role: "Operations", color: "#4A90D9", avatar: null },
+  { id: "2", name: "Unassigned", role: "", color: "#CBD5E1", avatar: null }
 ];
 
 export const TEAMS_DEFAULT = [

@@ -1,6 +1,9 @@
 import { Ic } from "./Icons";
 
 export const Av = ({ m, size = 30 }) => {
+  if (m.avatar) {
+    return <img className="av" src={m.avatar} alt={m.name} style={{ width: size, height: size, objectFit: "cover" }} />;
+  }
   const initials = m.name.split(" ").map(n => n[0]).join("").slice(0, 2);
   return <div className="av" style={{ width: size, height: size, fontSize: size * 0.37, background: m.color || "#94A3B8" }}>{initials}</div>;
 };
