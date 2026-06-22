@@ -64,7 +64,7 @@ export const VISION_DEFAULT = {
   oneYearGoals: ""
 };
 
-export const PERIOD_WEEKS = { weekly: 1, monthly: 4, quarterly: 13, annual: 52 };
+export const PERIOD_WEEKS = { weekly: 1, monthly: 4.33, quarterly: 13, annual: 52 };
 
 export const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
@@ -148,6 +148,32 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg)
 .tbl td{padding:12px 16px;border-bottom:1px solid var(--brd);font-size:14px;vertical-align:middle}
 .tbl tr:last-child td{border-bottom:none}
 .tbl tr:hover td{background:var(--bg)}
+
+/* ── Rock rows ── */
+.rock-row{border-bottom:1px solid var(--brd);background:var(--white)}
+.rock-row:last-child{border-bottom:none}
+.rock-row-main{display:flex;align-items:center;gap:10px;padding:11px 16px;cursor:pointer;user-select:none;transition:background .08s}
+.rock-row-main:hover{background:var(--bg)}
+.rock-expand{display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--t4);width:18px}
+.rock-row-main:hover .rock-expand{color:var(--t2)}
+.rock-body{flex:1;min-width:0}
+.rock-title-line{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:500;color:var(--t1)}
+.rock-title-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
+.rock-q-chip{font-size:11px;color:var(--t3);background:var(--bg2);border:1px solid var(--brd);padding:1px 8px;border-radius:10px;font-weight:500;flex-shrink:0;line-height:1.7}
+.rock-ms-hint{display:flex;align-items:center;gap:6px;margin-top:5px}
+.rock-ms-bar{width:60px;height:3px;border-radius:2px;background:var(--brd2);overflow:hidden;flex-shrink:0}
+.rock-ms-bar-fill{height:100%;background:var(--blue);border-radius:2px;transition:width .2s}
+.rock-ms-count-txt{font-size:11px;color:var(--t2)}
+.rock-row-right{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.rock-due{font-size:12px;color:var(--t2);white-space:nowrap}
+.rock-due.overdue{color:var(--red-t);display:flex;align-items:center;gap:3px}
+.rock-ms-panel{background:var(--bg);border-top:1px solid var(--brd2);padding:8px 16px 12px 52px}
+.rock-ms-item{display:flex;align-items:center;gap:9px;padding:4px 0}
+.rock-ms-item-txt{flex:1;font-size:13px;color:var(--t1)}
+.rock-ms-item-txt.done{text-decoration:line-through;color:var(--t3)}
+.rock-ms-input-row{display:flex;align-items:center;gap:8px;padding-top:6px;border-top:1px solid var(--brd);margin-top:4px}
+.rock-ms-input{flex:1;border:none;background:transparent;outline:none;font-size:13px;color:var(--t1);font-family:inherit;padding:3px 0}
+.rock-ms-input::placeholder{color:var(--t3)}
 
 /* ── Circle checkbox ── */
 .circle-ck{width:22px;height:22px;border-radius:50%;border:2px solid var(--brd2);cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .15s}
@@ -234,6 +260,7 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg)
 .vto-box{background:var(--white);border:1px solid var(--brd);border-radius:12px;overflow:hidden}
 .vto-field{padding:12px 16px;border-bottom:1px solid var(--brd)}
 .vto-field textarea{width:100%;border:none;outline:none;font-family:inherit;font-size:13px;color:var(--t1);resize:none;background:transparent;min-height:56px;line-height:1.5}
+.vto-field-desc{font-size:11.5px;color:var(--t3);margin-bottom:6px;line-height:1.5;font-style:italic}
 
 /* ── Org Chart ── */
 .org-wrap{padding:32px;overflow:auto;min-height:300px;display:flex;flex-direction:column;align-items:center}
@@ -270,6 +297,24 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg)
 .status{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:4px;font-size:12px;font-weight:600}
 .status-on{background:var(--green-l);color:var(--green-t)}
 .status-off{background:var(--red-l);color:var(--red-t)}
+
+/* ── Tab count badge ── */
+.tab-count{display:inline-flex;align-items:center;justify-content:center;background:var(--blue-l);color:var(--blue);border:1px solid #BFDBFE;border-radius:10px;font-size:11px;font-weight:700;padding:0 6px;margin-left:6px;min-width:20px;line-height:18px}
+
+/* ── Meeting history ── */
+.meet-history-row{display:flex;align-items:center;gap:14px;padding:14px 20px;border-bottom:1px solid var(--brd);cursor:pointer;transition:background .1s}
+.meet-history-row:last-child{border-bottom:none}
+.meet-history-row:hover{background:var(--bg)}
+.meet-history-icon{width:36px;height:36px;border-radius:10px;background:var(--blue-l);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--blue)}
+.meet-history-body{flex:1;min-width:0}
+.meet-history-title{font-size:14px;font-weight:600;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.meet-history-meta{font-size:12px;color:var(--t3);margin-top:2px}
+.meet-history-chips{display:flex;gap:6px;flex-wrap:wrap;flex-shrink:0}
+.meet-chip{font-size:11px;font-weight:500;color:var(--t2);background:var(--bg2);border:1px solid var(--brd);padding:2px 8px;border-radius:10px;white-space:nowrap}
+
+/* ── Notif dot ── */
+.notif-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.notif-title{font-size:13px;font-weight:600;color:var(--t1)}
 
 @keyframes fadeIn{from{opacity:0}}
 @keyframes modalIn{from{transform:translateY(10px);opacity:0}}
