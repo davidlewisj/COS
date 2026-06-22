@@ -368,7 +368,12 @@ function ScorecardPage({ scorecard, setScorecard, scData, setScData, team, activ
                         const hasVal = rawVal !== "" && !Number.isNaN(nVal);
                         const hit = hasVal && (metric.op === ">=" ? nVal >= metric.goal : nVal <= metric.goal);
                         const miss = hasVal && !hit;
-                        return <div key={p.key} className={`sc-data${hit ? " sc-hit" : ""}${miss ? " sc-miss" : ""}`}>
+                        const prevKey = allPeriods[colIndex + 1]?.key;
+                        const prevRaw = prevKey ? (scData[prevKey]?.[metric.id] ?? "") : "";
+                        const prevVal = parseFloat(prevRaw);
+                        const hasPrev = prevRaw !== "" && !Number.isNaN(prevVal);
+                        const trend = hasVal && hasPrev ? (nVal > prevVal ? "up" : nVal < prevVal ? "down" : null) : null;
+                        return <div key={p.key} className={`sc-data${hit ? " sc-hit" : ""}${miss ? " sc-miss" : ""}`} style={{ position: "relative" }}>
                           <input
                             ref={el => { cellRefs.current[`${rowIndex}-${colIndex}`] = el; }}
                             value={rawVal}
@@ -377,6 +382,9 @@ function ScorecardPage({ scorecard, setScorecard, scData, setScData, team, activ
                             inputMode="decimal"
                             placeholder="-"
                           />
+                          {trend && <span style={{ position: "absolute", top: 3, right: 4, pointerEvents: "none", opacity: 0.7 }}>
+                            {trend === "up" ? <Ic.TrendUp color={hit ? "var(--green-t)" : "var(--t3)"} /> : <Ic.TrendDown color={miss ? "var(--red-t)" : "var(--t3)"} />}
+                          </span>}
                         </div>;
                       }
 
@@ -1645,6 +1653,23 @@ function HeadlinesPage({ headlines, setHeadlines, team, activeMemberIds }) {
   </>;
 }
 
+const VTO_DESCRIPTIONS = {
+  coreValues:      "Who you are — the 3–7 principles that define your culture and guide every decision.",
+  purposePassion:  "Why you exist beyond profit — your core focus and reason for being.",
+  niche:           "What you do, who you do it for, and your geographic reach.",
+  tenYearTarget:   "A bold, specific goal 10 years out that inspires and directs the whole organization.",
+  marketTarget:    "Your ideal customer profile, key message, and proven process summary.",
+  threeUniques:    "The 3 things that make you truly different from every competitor in your space.",
+  provenProcess:   "The named, repeatable steps you follow every time to deliver your core product or service.",
+  guarantee:       "Your bold customer promise that eliminates perceived risk and builds trust.",
+  threeYearRevenue:"Revenue target three years from today.",
+  threeYearProfit: "Gross profit or EBITDA target three years from today.",
+  threeYearLooks:  "What does the business look, feel, and act like in 3 years? List specific, measurable snapshots.",
+  oneYearRevenue:  "Revenue goal for the next 12 months.",
+  oneYearProfit:   "Profit goal for the next 12 months.",
+  oneYearGoals:    "The 3–7 most important things you must accomplish this year to hit your 3-year picture."
+};
+
 function VisionPage({ vision, setVision }) {
   const purposeFields = [
     ["coreValues", "Core Values"],
@@ -1673,11 +1698,11 @@ function VisionPage({ vision, setVision }) {
       <div className="vto-grid">
         <div className="vto-box">
           <div className="sec-hdr"><h2>Vision</h2></div>
-          {purposeFields.map(([key, label]) => <div className="vto-field" key={key}><label style={{ fontSize: 11, color: "var(--t3)", textTransform: "uppercase", fontWeight: 700, letterSpacing: ".05em" }}>{label}</label><textarea value={vision[key] || ""} onChange={e => setField(key, e.target.value)} placeholder={`Add ${label.toLowerCase()}...`} /></div>)}
+          {purposeFields.map(([key, label]) => <div className="vto-field" key={key}><label style={{ fontSize: 11, color: "var(--t3)", textTransform: "uppercase", fontWeight: 700, letterSpacing: ".05em" }}>{label}</label><div className="vto-field-desc">{VTO_DESCRIPTIONS[key]}</div><textarea value={vision[key] || ""} onChange={e => setField(key, e.target.value)} placeholder={`Add ${label.toLowerCase()}...`} /></div>)}
         </div>
         <div className="vto-box">
           <div className="sec-hdr"><h2>Traction</h2></div>
-          {tractionFields.map(([key, label]) => <div className="vto-field" key={key}><label style={{ fontSize: 11, color: "var(--t3)", textTransform: "uppercase", fontWeight: 700, letterSpacing: ".05em" }}>{label}</label><textarea value={vision[key] || ""} onChange={e => setField(key, e.target.value)} placeholder={`Add ${label.toLowerCase()}...`} /></div>)}
+          {tractionFields.map(([key, label]) => <div className="vto-field" key={key}><label style={{ fontSize: 11, color: "var(--t3)", textTransform: "uppercase", fontWeight: 700, letterSpacing: ".05em" }}>{label}</label><div className="vto-field-desc">{VTO_DESCRIPTIONS[key]}</div><textarea value={vision[key] || ""} onChange={e => setField(key, e.target.value)} placeholder={`Add ${label.toLowerCase()}...`} /></div>)}
         </div>
       </div>
     </div></div>
