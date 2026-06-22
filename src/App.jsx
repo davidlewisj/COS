@@ -3,7 +3,7 @@ import { STORAGE_KEYS, PROFILE_DEFAULT, TEAM_DEFAULT, TEAMS_DEFAULT, SC_DEFAULT,
 import { uid, getWeekRange, getPeriods, getRollupVal, scaleGoal, load, save, fmtDate, isOverdue } from "./utils/helpers";
 import { useIsMobile } from "./hooks/useIsMobile";
 import { Ic } from "./components/Icons";
-import { Av, CircleCk, Modal, EmptySVG, GaugeChart, DonutChart, MiniBarChart } from "./components/Shared";
+import { Av, CircleCk, Modal, EmptySVG, DonutChart, MiniBarChart } from "./components/Shared";
 import { NotificationsPanel } from "./components/NotificationsPanel";
 
 // DASHBOARD PAGE
@@ -16,7 +16,6 @@ function DashboardPage({ todos, setTodos, rocks, issues, scorecard, scData, team
 
   const teamTodos = todos.filter(t => !t.done && activeMemberIds.includes(t.owner));
   const activeRocks = rocks.filter(r => activeMemberIds.includes(r.owner) && r.status !== "completed" && r.status !== "cancelled");
-  const onTrack = activeRocks.filter(r => r.status === "on-track").length;
   const activeScorecard = scorecard.filter(m => activeMemberIds.includes(m.owner));
   const hits = activeScorecard.filter(m => { const v = parseFloat(scData[week.key]?.[m.id]); return !isNaN(v) && (m.op === ">=" ? v >= m.goal : v <= m.goal); }).length;
 
@@ -55,7 +54,7 @@ function DashboardPage({ todos, setTodos, rocks, issues, scorecard, scData, team
         <W title="Scorecard" action={() => setPage("scorecard")} minH={120}>
           <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 0 12px" }}>
             <DonutChart hits={hits} total={activeScorecard.length} />
-            <div><div style={{ fontSize: 12, color: "var(--t2)" }}>This week's hits</div><div style={{ fontSize: 11, color: "var(--t3)", marginTop: 2 }}>{week.label}</div></div>
+            <div><div style={{ fontSize: 12, color: "var(--t2)" }}>This week&apos;s hits</div><div style={{ fontSize: 11, color: "var(--t3)", marginTop: 2 }}>{week.label}</div></div>
           </div>
         </W>
         <W title="Rocks" count={activeRocks.length} action={() => setPage("rocks")} minH={120}>
@@ -1158,13 +1157,14 @@ function IssuesPage({ issues, setIssues, team, activeMemberIds }) {
 
 function MeetingsPage({ meetings, setMeetings, issues, setIssues, todos, setTodos, rocks, setRocks, team, activeMemberIds }) {
   const store = meetings && typeof meetings === "object" ? meetings : {};
-  const mState = store.current || {
+  const defaultMeetingRef = useRef({
     title: "Weekly Level 10",
     date: new Date().toISOString().slice(0, 10),
     sections: { segue: "", scorecard: "", rocks: "", customerEmployee: "", todoReview: "", ids: "" },
     tangents: [],
     timerSeconds: 0
-  };
+  });
+  const mState = store.current || defaultMeetingRef.current;
   const history = store.history || [];
 
   const [running, setRunning] = useState(false);
@@ -1182,7 +1182,7 @@ function MeetingsPage({ meetings, setMeetings, issues, setIssues, todos, setTodo
       });
     }, 1000);
     return () => clearInterval(id);
-  }, [running, setMeetings]); // eslint-disable-line
+  }, [running, setMeetings, mState]); // eslint-disable-line
 
   const updateMeeting = updater => {
     setMeetings(prev => {
