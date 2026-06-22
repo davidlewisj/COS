@@ -8,7 +8,8 @@ export function uid() {
 // Date range functions
 export function getWeekRange(offset = 0) {
   const d = new Date();
-  d.setDate(d.getDate() - d.getDay() + 1 + offset * 7);
+  const day = d.getDay(); // 0=Sun … 6=Sat
+  d.setDate(d.getDate() - (day === 0 ? 6 : day - 1) + offset * 7);
   const end = new Date(d);
   end.setDate(end.getDate() + 6);
   return {
@@ -64,24 +65,33 @@ export function getYTDPeriods() {
 }
 
 export function getPeriods(tab) {
-  if (tab === "ytd") return getYTDPeriods();
+  if (tab === "ytd") {
+    const yr = new Date().getFullYear();
+    return [{ key: String(yr), label: `YTD ${yr}` }];
+  }
   if (tab === "monthly") return Array.from({ length: 12 }, (_, i) => getMonthRange(-i));
   if (tab === "quarterly") return Array.from({ length: 8 }, (_, i) => getQuarterRange(-i));
   if (tab === "annual") return Array.from({ length: 5 }, (_, i) => getYearRange(-i));
   return Array.from({ length: 52 }, (_, i) => getWeekRange(-i));
 }
 
-// Check if weekly key belongs to a period
+// Check if weekly key belongs to a period.
+// Uses the Thursday of the week (ISO standard) to determine which month/quarter/year
+// the week belongs to — avoids misattributing cross-boundary weeks.
 export function weekBelongsTo(weekKey, periodKey, tab) {
-  if (tab === "monthly") return weekKey.startsWith(periodKey);
+  const thu = new Date(weekKey + "T00:00:00");
+  thu.setDate(thu.getDate() + 3); // Monday + 3 = Thursday
+  const thuYear = thu.getFullYear();
+  const thuMonth = String(thu.getMonth() + 1).padStart(2, "0");
+  const thuQ = Math.floor(thu.getMonth() / 3) + 1;
+
+  if (tab === "monthly") return `${thuYear}-${thuMonth}` === periodKey;
   if (tab === "quarterly") {
     const yr = periodKey.slice(0, 4);
     const qn = parseInt(periodKey.slice(6));
-    const mo = parseInt(weekKey.slice(5, 7));
-    const qMos = { 1: [1, 2, 3], 2: [4, 5, 6], 3: [7, 8, 9], 4: [10, 11, 12] };
-    return weekKey.startsWith(yr) && qMos[qn].includes(mo);
+    return String(thuYear) === yr && thuQ === qn;
   }
-  if (tab === "annual") return weekKey.startsWith(periodKey);
+  if (tab === "annual" || tab === "ytd") return String(thuYear) === periodKey;
   return false;
 }
 

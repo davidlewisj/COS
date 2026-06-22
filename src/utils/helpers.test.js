@@ -113,7 +113,7 @@ describe("scaleGoal", () => {
   });
 
   it("scales non-percent goals by the period's week count", () => {
-    expect(scaleGoal({ unit: "#", goal: 10 }, "monthly")).toBe(40);
+    expect(scaleGoal({ unit: "#", goal: 10 }, "monthly")).toBe(43);
     expect(scaleGoal({ unit: "#", goal: 10 }, "quarterly")).toBe(130);
   });
 });

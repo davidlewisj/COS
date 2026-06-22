@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, Fragment } from "react";
 import { STORAGE_KEYS, PROFILE_DEFAULT, TEAM_DEFAULT, TEAMS_DEFAULT, SC_DEFAULT, VISION_DEFAULT, SEATS_DEFAULT, PEOPLE_ANALYZER_DEFAULT, CSS } from "./constants";
 import { uid, getWeekRange, getPeriods, getRollupVal, scaleGoal, parseLines, currentQuarterLabel, milestoneProgress, load, save, fmtDate, isOverdue } from "./utils/helpers";
 import { useIsMobile } from "./hooks/useIsMobile";
@@ -15,7 +15,7 @@ function DashboardPage({ todos, setTodos, rocks, issues, scorecard, scData, team
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
 
   const teamTodos = todos.filter(t => !t.done && activeMemberIds.includes(t.owner));
-  const activeRocks = rocks.filter(r => activeMemberIds.includes(r.owner) && r.status !== "completed");
+  const activeRocks = rocks.filter(r => activeMemberIds.includes(r.owner) && r.status !== "completed" && r.status !== "cancelled");
   const activeScorecard = scorecard.filter(m => activeMemberIds.includes(m.owner));
   const hits = activeScorecard.filter(m => { const v = parseFloat(scData[week.key]?.[m.id]); return !isNaN(v) && v >= m.goal; }).length;
 
@@ -63,7 +63,7 @@ function DashboardPage({ todos, setTodos, rocks, issues, scorecard, scData, team
               <tbody>
                 {activeRocks.slice(0, 5).map(r => (
                   <tr key={r.id} style={{ borderBottom: "1px solid var(--brd)" }}>
-                    <td style={{ padding: "8px 0" }}>{r.status === "on-track" ? <Ic.OnTrack /> : <Ic.OffTrack />}</td>
+                    <td style={{ padding: "8px 0" }}><RockStatusBadge rock={r} /></td>
                     <td style={{ padding: "8px", fontSize: 13 }}>{r.title}</td>
                     <td style={{ padding: "8px 0", fontSize: 12, color: "var(--t2)" }}>{fmtDate(r.dueDate)}</td>
                   </tr>
@@ -101,14 +101,40 @@ function TodosPage({ todos, setTodos, team, activeMemberIds, rocks }) {
   const [archive, setArchive] = useState(false);
   const [ownerFilter, setOwnerFilter] = useState("all");
   const [modal, setModal] = useState(null);
-  const [form, setForm] = useState({ title: "", owner: "1", dueDate: "", rockId: "" });
+  const [editId, setEditId] = useState(null);
+  const [form, setForm] = useState({ title: "", owner: "1", dueDate: "", rockId: "", notes: "" });
 
   const openAdd = () => {
     const d = new Date();
     d.setDate(d.getDate() + 7);
-    setForm({ title: "", owner: "1", dueDate: d.toISOString().split("T")[0], rockId: "" });
-    setModal("add");
+    setEditId(null);
+    setForm({ title: "", owner: "1", dueDate: d.toISOString().split("T")[0], rockId: "", notes: "" });
+    setModal("todo");
   };
+
+  const openEdit = todo => {
+    setEditId(todo.id);
+    setForm({ title: todo.title || "", owner: todo.owner || "1", dueDate: todo.dueDate || "", rockId: todo.rockId || "", notes: todo.notes || "" });
+    setModal("todo");
+  };
+
+  const saveTodo = () => {
+    const title = form.title.trim();
+    if (!title) return;
+    const payload = { title, owner: form.owner, dueDate: form.dueDate, rockId: form.rockId || null, notes: form.notes };
+    if (editId) {
+      setTodos(p => p.map(x => (x.id === editId ? { ...x, ...payload } : x)));
+    } else {
+      setTodos(p => [...p, { id: uid(), ...payload, done: false, createdAt: new Date().toISOString() }]);
+    }
+    setModal(null);
+  };
+
+  const removeTodo = id => {
+    setTodos(p => p.filter(x => x.id !== id));
+    setModal(null);
+  };
+
   const filtered = todos.filter(t => {
     if (archive ? !t.done : t.done) return false;
     if (!activeMemberIds.includes(t.owner)) return false;
@@ -137,39 +163,46 @@ function TodosPage({ todos, setTodos, team, activeMemberIds, rocks }) {
     <div className="content"><div className="content-inner">
       <div className="sec">
         <div className="sec-hdr"><h2>To-Dos<span className="count">{filtered.length}</span></h2></div>
-        {filtered.length === 0 ? <div className="empty"><EmptySVG.todos /><h3>{archive ? "No archived to-dos" : "All caught up!"}</h3><p>Create a to-do to get started.</p></div> : <table className="tbl"><thead><tr><th style={{ width: 42 }}></th><th>Title</th><th style={{ width: 100 }}>Due By</th><th style={{ width: 70 }}>Owner</th></tr></thead><tbody>
+        {filtered.length === 0 ? <div className="empty"><EmptySVG.todos /><h3>{archive ? "No archived to-dos" : "All caught up!"}</h3><p>Create a to-do to get started.</p></div> : <table className="tbl"><thead><tr><th style={{ width: 42 }}></th><th>Title</th><th style={{ width: 100 }}>Due By</th><th style={{ width: 70 }}>Owner</th><th style={{ width: 60 }}></th></tr></thead><tbody>
           {filtered.map(t => {
             const m = team.find(x => x.id === t.owner) || team[1];
             const od = isOverdue(t.dueDate) && !t.done;
             const linkedRock = t.rockId && rocks.find(r => r.id === t.rockId);
             return <tr key={t.id}>
               <td><CircleCk on={t.done} toggle={() => setTodos(p => p.map(x => x.id === t.id ? { ...x, done: !x.done } : x))} /></td>
-              <td>{t.title}{linkedRock && <span className="tag" style={{ marginLeft: 8 }}>{linkedRock.title}</span>}</td>
+              <td>{t.title}{linkedRock && <span className="tag" style={{ marginLeft: 8 }}>{linkedRock.title}</span>}
+                {!!t.notes && <div style={{ fontSize: 12, color: "var(--t3)", marginTop: 2 }}>{t.notes.slice(0, 90)}{t.notes.length > 90 ? "…" : ""}</div>}
+              </td>
               <td style={{ color: od ? "var(--red-t)" : "var(--t2)" }}>{od && <Ic.Warn />}{fmtDate(t.dueDate)}</td>
               <td><Av m={m} /></td>
+              <td><button className="btn-ghost" onClick={() => openEdit(t)}>Edit</button></td>
             </tr>;
           })}
         </tbody></table>}
       </div>
     </div></div>
-    {modal !== null && <Modal title={modal === "add" ? "Create To-Do" : "Edit To-Do"} onClose={() => setModal(null)}>
+    {modal === "todo" && <Modal title={editId ? "Edit To-Do" : "Create To-Do"} onClose={() => setModal(null)}>
       <div className="modal-body">
         <div className="field"><label>Title</label><input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="What needs to be done?" autoFocus /></div>
         <div style={{ display: "flex", gap: 12 }}>
           <div className="field" style={{ flex: 1 }}><label>Owner</label><select value={form.owner} onChange={e => setForm({ ...form, owner: e.target.value })}>{team.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select></div>
           <div className="field" style={{ flex: 1 }}><label>Due Date</label><input type="date" value={form.dueDate} onChange={e => setForm({ ...form, dueDate: e.target.value })} /></div>
         </div>
-        <div className="field" style={{ marginBottom: 0 }}>
+        <div className="field">
           <label>Linked rock (optional)</label>
           <select value={form.rockId} onChange={e => setForm({ ...form, rockId: e.target.value })}>
             <option value="">None</option>
             {rocks.map(r => <option key={r.id} value={r.id}>{r.title}</option>)}
           </select>
         </div>
+        <div className="field" style={{ marginBottom: 0 }}><label>Notes</label><textarea rows={3} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} placeholder="Context or details" /></div>
       </div>
-      <div className="modal-foot">
-        <button className="btn" onClick={() => setModal(null)}>Cancel</button>
-        <button className="btn btn-p" onClick={() => { if (form.title.trim()) { setTodos(p => [...p, { id: uid(), ...form, rockId: form.rockId || null, done: false, createdAt: new Date().toISOString() }]); setModal(null); } }}>Create</button>
+      <div className="modal-foot" style={{ justifyContent: "space-between" }}>
+        <div>{editId && <button className="btn" style={{ color: "var(--red-t)", borderColor: "var(--red)" }} onClick={() => removeTodo(editId)}><Ic.Trash /> Delete</button>}</div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn" onClick={() => setModal(null)}>Cancel</button>
+          <button className="btn btn-p" onClick={saveTodo}>{editId ? "Save" : "Create"}</button>
+        </div>
       </div>
     </Modal>}
   </>;
@@ -335,7 +368,12 @@ function ScorecardPage({ scorecard, setScorecard, scData, setScData, team, activ
                         const hasVal = rawVal !== "" && !Number.isNaN(nVal);
                         const hit = hasVal && (metric.op === ">=" ? nVal >= metric.goal : nVal <= metric.goal);
                         const miss = hasVal && !hit;
-                        return <div key={p.key} className={`sc-data${hit ? " sc-hit" : ""}${miss ? " sc-miss" : ""}`}>
+                        const prevKey = allPeriods[colIndex + 1]?.key;
+                        const prevRaw = prevKey ? (scData[prevKey]?.[metric.id] ?? "") : "";
+                        const prevVal = parseFloat(prevRaw);
+                        const hasPrev = prevRaw !== "" && !Number.isNaN(prevVal);
+                        const trend = hasVal && hasPrev ? (nVal > prevVal ? "up" : nVal < prevVal ? "down" : null) : null;
+                        return <div key={p.key} className={`sc-data${hit ? " sc-hit" : ""}${miss ? " sc-miss" : ""}`} style={{ position: "relative" }}>
                           <input
                             ref={el => { cellRefs.current[`${rowIndex}-${colIndex}`] = el; }}
                             value={rawVal}
@@ -344,6 +382,9 @@ function ScorecardPage({ scorecard, setScorecard, scData, setScData, team, activ
                             inputMode="decimal"
                             placeholder="-"
                           />
+                          {trend && <span style={{ position: "absolute", top: 3, right: 4, pointerEvents: "none", opacity: 0.7 }}>
+                            {trend === "up" ? <Ic.TrendUp color={hit ? "var(--green-t)" : "var(--t3)"} /> : <Ic.TrendDown color={miss ? "var(--red-t)" : "var(--t3)"} />}
+                          </span>}
                         </div>;
                       }
 
@@ -420,6 +461,68 @@ function ScorecardPage({ scorecard, setScorecard, scData, setScData, team, activ
   </>;
 }
 
+const ROCK_STATUS = {
+  "on-track":  { label: "On Track",  bg: "var(--blue-l)",  color: "var(--blue-t)",  border: "var(--blue)" },
+  "off-track": { label: "Off Track", bg: "var(--red-l)",   color: "var(--red-t)",   border: "var(--red)" },
+  "completed": { label: "Completed", bg: "var(--green-l)", color: "var(--green-t)", border: "var(--green)" },
+  "cancelled": { label: "Cancelled", bg: "var(--bg2)",     color: "var(--t2)",      border: "var(--brd2)" }
+};
+
+const THUMB_PATH = "M185.046,94.718c0.311-0.523,0.723-1.084,1.174-1.575c0.086-0.104,8.339-10.704,5.547-21.774c-1.381-5.476-5.164-9.953-11.248-13.31c1.532-3.761,3.504-10.733,0.948-17.569c-2.083-5.565-6.66-9.802-13.607-12.583c-0.723-4.345-3.207-14.552-11.134-21.176c-4.656-3.894-10.418-5.869-17.121-5.869c-1.059,0-2.108,0.05-2.924,0.147C135.243,0.834,127.498,0,116.747,0C98.81,0,73.103,2.273,52.568,13.074l-14.237,4.223H10.666v6.174h28.112l16.094-4.703C74.638,8.421,99.726,6.252,117.305,6.252c11.198,0,18.775,0.895,18.864,0.902l0.422,0.029l0.229-0.018c6.385-0.612,11.785,0.841,15.926,4.287c7.87,6.56,9.173,18.47,9.219,18.971l0.175,1.993l1.893,0.659c6.127,2.112,10.046,5.329,11.628,9.552c2.645,7.036-1.714,14.985-1.9,15.314l-1.686,2.956l3.106,1.392c5.919,2.659,9.484,6.22,10.59,10.572c1.832,7.219-3.267,14.888-4.28,16.32c-0.837,0.902-3.532,4.148-2.967,7.655l0.519,1.832l1.729,0.551c0.88,0.286,6.893,6.646,6.635,13.07c-0.2,4.971-4.388,8.453-12.458,10.357c-2.122,0.505-4.366,0.744-6.871,0.744c-2.935,0-5.891-0.34-8.74-0.659c-2.484-0.293-5.297-0.619-8.027-0.619c-6.478,0-14.663,1.657-20.539,14.584c-3.751,8.271-0.898,22.21,0.641,29.697l0.243,1.242c3.142,15.643,0.798,23.424-8.629,28.717c-2.834,1.585-5.494,2.119-6.893,1.41c-1.213-0.63-1.997-2.341-2.305-5.086c-0.104-0.963-0.004-2.52,0.079-4.037c0.437-7.591,1.16-20.31-10.679-38.394c-13.678-14.999-20.714-18.073-22.45-18.614c-6.778-4.03-12.991-9.48-19.075-14.827c-6.123-5.365-12.451-10.912-19.562-15.174l-0.712-0.422l-26.82-0.415l-0.455-0.011l-0.097,6.177l25.61,0.387c6.399,3.958,12.322,9.151,18.07,14.19c6.267,5.501,12.751,11.195,20.242,15.6l0.626,0.254c0.061,0.021,6.506,2.154,19.752,16.62c10.447,16.019,9.781,27.457,9.38,34.325c-0.104,1.832-0.208,3.565-0.039,5.007c0.54,4.939,2.434,8.271,5.608,9.899c1.296,0.673,2.766,1.006,4.37,1.006c2.545,0,5.433-0.866,8.371-2.516c14.806-8.31,14.348-21.885,11.653-35.316l-0.258-1.256c-1.281-6.327-3.962-19.494-1.052-25.914c4.141-9.122,8.893-10.991,14.752-10.991c2.29,0,4.846,0.293,7.605,0.612c2.97,0.344,6.041,0.687,9.326,0.687c3.013,0,5.726-0.297,8.278-0.898c14.333-3.382,17.286-11.055,17.229-16.906C193.528,104.477,188.66,97.549,185.046,94.718z";
+
+const CANCELLED_PATH = "M213.333333,1.42108547e-14 C331.15408,1.42108547e-14 426.666667,95.5125867 426.666667,213.333333 C426.666667,331.15408 331.15408,426.666667 213.333333,426.666667 C95.5125867,426.666667 4.26325641e-14,331.15408 4.26325641e-14,213.333333 C4.26325641e-14,95.5125867 95.5125867,1.42108547e-14 213.333333,1.42108547e-14 Z M42.6666667,213.333333 C42.6666667,307.589931 119.076736,384 213.333333,384 C252.77254,384 289.087204,370.622239 317.987133,348.156908 L78.5096363,108.679691 C56.044379,137.579595 42.6666667,173.894198 42.6666667,213.333333 Z M213.333333,42.6666667 C173.894198,42.6666667 137.579595,56.044379 108.679691,78.5096363 L348.156908,317.987133 C370.622239,289.087204 384,252.77254 384,213.333333 C384,119.076736 307.589931,42.6666667 213.333333,42.6666667 Z";
+
+function ThumbIcon({ up, color, size = 13 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 204.249 204.249" fill={color}
+         style={{ display: "block", flexShrink: 0, transform: up ? "scaleY(-1)" : "none" }}>
+      <path d={THUMB_PATH} />
+    </svg>
+  );
+}
+
+function CompletedIcon({ color, size = 14 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 12 12" fill="none"
+         style={{ display: "block", flexShrink: 0 }}>
+      <circle cx="6" cy="6" r="6" fill={color} />
+      <path d="M2.5 6.5L5 9l4.5-5" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function CancelledIcon({ color, size = 11 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 512 512" fill={color}
+         style={{ display: "block", flexShrink: 0 }}>
+      <g transform="translate(42.666667, 42.666667)">
+        <path d={CANCELLED_PATH} />
+      </g>
+    </svg>
+  );
+}
+
+function RockStatusBadge({ rock, onChange }) {
+  const s = ROCK_STATUS[rock.status] || ROCK_STATUS["on-track"];
+  const icon = rock.status === "on-track" ? <ThumbIcon up color={s.color} /> :
+               rock.status === "off-track" ? <ThumbIcon color={s.color} /> :
+               rock.status === "completed" ? <CompletedIcon color={s.color} /> :
+               <CancelledIcon color={s.color} />;
+  return (
+    <div style={{ position: "relative", display: "inline-flex" }} onClick={onChange ? e => e.stopPropagation() : undefined}>
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 10px", borderRadius: 20, fontSize: 12, fontWeight: 600, background: s.bg, color: s.color, border: `1px solid ${s.border}`, whiteSpace: "nowrap", cursor: onChange ? "pointer" : "default", userSelect: "none" }}>
+        {icon} {s.label}
+      </span>
+      {onChange && <select style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer", width: "100%" }} value={rock.status || "on-track"} onChange={e => onChange(rock.id, e.target.value)}>
+        <option value="on-track">On Track</option>
+        <option value="off-track">Off Track</option>
+        <option value="completed">Completed</option>
+        <option value="cancelled">Cancelled</option>
+      </select>}
+    </div>
+  );
+}
+
 // PLACEHOLDER PAGES
 function RocksPage({ rocks, setRocks, team, activeMemberIds, issues, todos }) {
   const [tab, setTab] = useState("active");
@@ -431,6 +534,7 @@ function RocksPage({ rocks, setRocks, team, activeMemberIds, issues, todos }) {
   const [form, setForm] = useState({ title: "", owner: "1", dueDate: "", status: "on-track", quarter: "", milestones: [] });
   const [msTitle, setMsTitle] = useState("");
   const [msDue, setMsDue] = useState("");
+  const [expandedRocks, setExpandedRocks] = useState({});
 
   const now = new Date();
   const qNum = Math.floor(now.getMonth() / 3) + 1;
@@ -493,6 +597,16 @@ function RocksPage({ rocks, setRocks, team, activeMemberIds, issues, todos }) {
     setRocks(prev => prev.map(r => (r.id === id ? { ...r, status } : r)));
   };
 
+  const toggleRowExpanded = id => {
+    setExpandedRocks(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const toggleRockMilestone = (rockId, msId) => {
+    setRocks(prev => prev.map(r => (r.id === rockId
+      ? { ...r, milestones: (r.milestones || []).map(m => (m.id === msId ? { ...m, done: !m.done } : m)) }
+      : r)));
+  };
+
   const addMilestone = () => {
     const title = msTitle.trim();
     if (!title) return;
@@ -515,7 +629,7 @@ function RocksPage({ rocks, setRocks, team, activeMemberIds, issues, todos }) {
   const filtered = rocks
     .filter(r => {
       if (!activeMemberIds.includes(r.owner)) return false;
-      if (tab === "active" && r.status === "completed") return false;
+      if (tab === "active" && (r.status === "completed" || r.status === "cancelled")) return false;
       if (tab === "completed" && r.status !== "completed") return false;
       if (ownerFilter !== "all" && r.owner !== ownerFilter) return false;
       if (statusFilter !== "all" && r.status !== statusFilter) return false;
@@ -551,6 +665,7 @@ function RocksPage({ rocks, setRocks, team, activeMemberIds, issues, todos }) {
         <option value="on-track">On Track</option>
         <option value="off-track">Off Track</option>
         <option value="completed">Completed</option>
+        <option value="cancelled">Cancelled</option>
       </select>
       <div className="tb-search">
         <Ic.Search />
@@ -582,26 +697,46 @@ function RocksPage({ rocks, setRocks, team, activeMemberIds, issues, todos }) {
                 const m = team.find(x => x.id === rock.owner) || team[1];
                 const overdue = rock.status !== "completed" && isOverdue(rock.dueDate);
                 const { done: msDone, total: msTotal } = milestoneProgress(rock.milestones);
-                return <tr key={rock.id}>
-                  <td>{rock.title}</td>
-                  <td>
-                    {msTotal === 0 ? <span style={{ color: "var(--t3)" }}>-</span> : <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <div className="progress-bar"><div className="progress-fill" style={{ width: `${(msDone / msTotal) * 100}%` }} /></div>
-                      <span style={{ fontSize: 12, color: "var(--t2)", whiteSpace: "nowrap" }}>{msDone}/{msTotal}</span>
-                    </div>}
-                  </td>
-                  <td style={{ color: "var(--t2)" }}>{rock.quarter || "-"}</td>
-                  <td style={{ color: overdue ? "var(--red-t)" : "var(--t2)" }}>{overdue && <Ic.Warn />}{fmtDate(rock.dueDate)}</td>
-                  <td><Av m={m} /></td>
-                  <td>
-                    <select className="tb-filter" style={{ borderRadius: 8, padding: "5px 10px" }} value={rock.status || "on-track"} onChange={e => setRockStatus(rock.id, e.target.value)}>
-                      <option value="on-track">On Track</option>
-                      <option value="off-track">Off Track</option>
-                      <option value="completed">Completed</option>
-                    </select>
-                  </td>
-                  <td><button className="btn-ghost" onClick={() => openEdit(rock)}>Edit</button></td>
-                </tr>;
+                const expanded = msTotal > 0 && !!expandedRocks[rock.id];
+                return <Fragment key={rock.id}>
+                  <tr>
+                    <td>{rock.title}</td>
+                    <td>
+                      {msTotal === 0 ? <span style={{ color: "var(--t3)" }}>-</span> : (
+                        <button
+                          className="btn-ghost"
+                          style={{ display: "flex", alignItems: "center", gap: 8, padding: 0, width: "100%", textAlign: "left" }}
+                          onClick={() => toggleRowExpanded(rock.id)}
+                          title={expanded ? "Hide milestones" : "Show milestones"}
+                        >
+                          <Ic.Chevron dir={expanded ? "down" : "right"} />
+                          <div className="progress-bar"><div className="progress-fill" style={{ width: `${(msDone / msTotal) * 100}%` }} /></div>
+                          <span style={{ fontSize: 12, color: "var(--t2)", whiteSpace: "nowrap" }}>{msDone}/{msTotal}</span>
+                        </button>
+                      )}
+                    </td>
+                    <td style={{ color: "var(--t2)" }}>{rock.quarter || "-"}</td>
+                    <td style={{ color: overdue ? "var(--red-t)" : "var(--t2)" }}>{overdue && <Ic.Warn />}{fmtDate(rock.dueDate)}</td>
+                    <td><Av m={m} /></td>
+                    <td>
+                      <RockStatusBadge rock={rock} onChange={setRockStatus} />
+                    </td>
+                    <td><button className="btn-ghost" onClick={() => openEdit(rock)}>Edit</button></td>
+                  </tr>
+                  {expanded && <tr>
+                    <td colSpan={7} style={{ padding: 0 }}>
+                      <div className="rock-ms-panel" style={{ paddingLeft: 16 }}>
+                        {rock.milestones.map(ms => (
+                          <div key={ms.id} className="rock-ms-item">
+                            <CircleCk on={ms.done} toggle={() => toggleRockMilestone(rock.id, ms.id)} />
+                            <span className={`rock-ms-item-txt${ms.done ? " done" : ""}`}>{ms.title}</span>
+                            {ms.dueDate && <span style={{ fontSize: 11, color: "var(--t3)", whiteSpace: "nowrap" }}>{fmtDate(ms.dueDate)}</span>}
+                          </div>
+                        ))}
+                      </div>
+                    </td>
+                  </tr>}
+                </Fragment>;
               })}
             </tbody>
           </table>
@@ -640,6 +775,7 @@ function RocksPage({ rocks, setRocks, team, activeMemberIds, issues, todos }) {
               <option value="on-track">On Track</option>
               <option value="off-track">Off Track</option>
               <option value="completed">Completed</option>
+              <option value="cancelled">Cancelled</option>
             </select>
           </div>
         </div>
@@ -1552,6 +1688,23 @@ function HeadlinesPage({ headlines, setHeadlines, team, activeMemberIds }) {
   </>;
 }
 
+const VTO_DESCRIPTIONS = {
+  coreValues:      "Who you are — the 3–7 principles that define your culture and guide every decision.",
+  purposePassion:  "Why you exist beyond profit — your core focus and reason for being.",
+  niche:           "What you do, who you do it for, and your geographic reach.",
+  tenYearTarget:   "A bold, specific goal 10 years out that inspires and directs the whole organization.",
+  marketTarget:    "Your ideal customer profile, key message, and proven process summary.",
+  threeUniques:    "The 3 things that make you truly different from every competitor in your space.",
+  provenProcess:   "The named, repeatable steps you follow every time to deliver your core product or service.",
+  guarantee:       "Your bold customer promise that eliminates perceived risk and builds trust.",
+  threeYearRevenue:"Revenue target three years from today.",
+  threeYearProfit: "Gross profit or EBITDA target three years from today.",
+  threeYearLooks:  "What does the business look, feel, and act like in 3 years? List specific, measurable snapshots.",
+  oneYearRevenue:  "Revenue goal for the next 12 months.",
+  oneYearProfit:   "Profit goal for the next 12 months.",
+  oneYearGoals:    "The 3–7 most important things you must accomplish this year to hit your 3-year picture."
+};
+
 function VisionPage({ vision, setVision }) {
   const purposeFields = [
     ["coreValues", "Core Values"],
@@ -1580,11 +1733,11 @@ function VisionPage({ vision, setVision }) {
       <div className="vto-grid">
         <div className="vto-box">
           <div className="sec-hdr"><h2>Vision</h2></div>
-          {purposeFields.map(([key, label]) => <div className="vto-field" key={key}><label style={{ fontSize: 11, color: "var(--t3)", textTransform: "uppercase", fontWeight: 700, letterSpacing: ".05em" }}>{label}</label><textarea value={vision[key] || ""} onChange={e => setField(key, e.target.value)} placeholder={`Add ${label.toLowerCase()}...`} /></div>)}
+          {purposeFields.map(([key, label]) => <div className="vto-field" key={key}><label style={{ fontSize: 11, color: "var(--t3)", textTransform: "uppercase", fontWeight: 700, letterSpacing: ".05em" }}>{label}</label><div className="vto-field-desc">{VTO_DESCRIPTIONS[key]}</div><textarea value={vision[key] || ""} onChange={e => setField(key, e.target.value)} placeholder={`Add ${label.toLowerCase()}...`} /></div>)}
         </div>
         <div className="vto-box">
           <div className="sec-hdr"><h2>Traction</h2></div>
-          {tractionFields.map(([key, label]) => <div className="vto-field" key={key}><label style={{ fontSize: 11, color: "var(--t3)", textTransform: "uppercase", fontWeight: 700, letterSpacing: ".05em" }}>{label}</label><textarea value={vision[key] || ""} onChange={e => setField(key, e.target.value)} placeholder={`Add ${label.toLowerCase()}...`} /></div>)}
+          {tractionFields.map(([key, label]) => <div className="vto-field" key={key}><label style={{ fontSize: 11, color: "var(--t3)", textTransform: "uppercase", fontWeight: 700, letterSpacing: ".05em" }}>{label}</label><div className="vto-field-desc">{VTO_DESCRIPTIONS[key]}</div><textarea value={vision[key] || ""} onChange={e => setField(key, e.target.value)} placeholder={`Add ${label.toLowerCase()}...`} /></div>)}
         </div>
       </div>
     </div></div>
@@ -1926,6 +2079,39 @@ function ProfilePage({ profile, setProfile, onExportBackup, onImportBackup }) {
   </>;
 }
 
+// MOBILE BOTTOM NAV (with "More" overflow for pages beyond the first 5)
+function MobileNav({ page, setPage, navMain, navExtra, activeTodos, openIssues }) {
+  const [moreOpen, setMoreOpen] = useState(false);
+  const mainFive = navMain.slice(0, 5);
+  const morePages = [...navMain.slice(5), ...navExtra];
+  const moreActive = morePages.some(p => p.id === page);
+  return <>
+    {moreOpen && <>
+      <div style={{ position: "fixed", inset: 0, zIndex: 98 }} onClick={() => setMoreOpen(false)} />
+      <div style={{ position: "fixed", bottom: 60, right: 8, zIndex: 99, background: "var(--white)", border: "1px solid var(--brd)", borderRadius: 12, boxShadow: "0 4px 24px rgba(0,0,0,.12)", minWidth: 180, overflow: "hidden" }}>
+        {morePages.map(n => (
+          <div key={n.id} onClick={() => { setPage(n.id); setMoreOpen(false); }}
+            style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", cursor: "pointer", background: page === n.id ? "var(--blue-l)" : "transparent", color: page === n.id ? "var(--blue)" : "var(--t1)", borderBottom: "1px solid var(--brd)", fontSize: 14, fontWeight: 500 }}>
+            {n.icon}<span>{n.label}</span>
+          </div>
+        ))}
+      </div>
+    </>}
+    <div className="bnav">
+      {mainFive.map(n => (
+        <div key={n.id} className={`bnav-i${page === n.id ? " on" : ""}`} onClick={() => setPage(n.id)}>
+          {n.icon}<span>{n.label}</span>
+          {n.id === "todos" && activeTodos > 0 && <span className="bbdg">{activeTodos}</span>}
+          {n.id === "issues" && openIssues > 0 && <span className="bbdg">{openIssues}</span>}
+        </div>
+      ))}
+      <div className={`bnav-i${moreActive ? " on" : ""}`} onClick={() => setMoreOpen(v => !v)}>
+        <Ic.More /><span>More</span>
+      </div>
+    </div>
+  </>;
+}
+
 // MAIN APP
 export default function App({ orgName }) {
   const [page, setPage] = useState("dashboard");
@@ -2090,9 +2276,7 @@ export default function App({ orgName }) {
       {page === "team" && <TeamPage {...{ team, setTeam, teams, setTeams }} />}
       {page === "profile" && <ProfilePage {...{ profile, setProfile, onExportBackup: exportBackup, onImportBackup: importBackup }} />}
     </div>
-    {mob && <div className="bnav">
-      {navMain.slice(0, 5).map(n => (<div key={n.id} className={`bnav-i${page === n.id ? " on" : ""}`} onClick={() => setPage(n.id)}>{n.icon}<span>{n.label}</span>{n.id === "todos" && activeTodos > 0 && <span className="bbdg">{activeTodos}</span>}{n.id === "issues" && openIssues > 0 && <span className="bbdg">{openIssues}</span>}</div>))}
-    </div>}
+    {mob && <MobileNav page={page} setPage={setPage} navMain={navMain} navExtra={navExtra} activeTodos={activeTodos} openIssues={openIssues} />}
     {notifOpen && <NotificationsPanel onClose={() => setNotifOpen(false)} todos={todos} rocks={rocks} issues={issues} scorecard={scorecard.filter(m => activeMemberIds.includes(m.owner))} scData={scData} />}
   </div>;
 }
